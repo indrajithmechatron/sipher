@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Hardware / engineering
+hardware/**/*.step
+hardware/**/*.stl
+hardware/**/*.gcode
+
+# Tooling
+.idea/
+.vscode/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
