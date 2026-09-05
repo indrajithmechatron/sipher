@@ -51,6 +51,11 @@ def servo(cmd):
         subprocess.run(["/home/sipher/.local/bin/mpremote","connect","/dev/ttyACM0","exec","import machine; i2c=machine.I2C(1,sda=machine.Pin(2),scl=machine.Pin(3)); i2c.writeto_mem(0x40,0x00,bytes([16]))"], stdout=subprocess.DEVNULL)
         tts("stopped")
         print("stop triggered", flush=True)
+    elif "shutdown" in cmd and "pi" in cmd:
+        tts("shutting down")
+        print("shutdown triggered", flush=True)
+        time.sleep(1)
+        subprocess.run(["bash","-c","echo marin26 | sudo -S shutdown -h now"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 print("always on — say rotate / stop", flush=True)
 while True:
@@ -68,7 +73,10 @@ while True:
     print("heard:",repr(txt), flush=True)
     if not txt: continue
     # calm backchannel filler while thinking already handled by tts above
-    if "rotate" in txt or "motor" in txt or "servo" in txt:
+    if "shutdown" in txt and "pi" in txt:
+        tts("okay shutting down")
+        servo("shutdown pi")
+    elif "rotate" in txt or "motor" in txt or "servo" in txt:
         # hmm filler before action
         if "hmm" not in txt: tts("hmm okay")
         servo("rotate")
