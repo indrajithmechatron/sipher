@@ -1,0 +1,16 @@
+# Sipher Security Layer - Gitleaks Configuration
+title = "sipher secret detection configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist for non-sensitive public references"
+paths = [
+    '''docs/hardware/pico-circuit\.png''',
+    '''software/firmware/anime\.rgb565'''
+]
+regexes = [
+    '''0x[0-9a-fA-F]{2,4}''', # I2C / SPI register hex addresses
+    '''fe80::[0-9a-fA-F:]+'''  # Link-local IPv6 addresses
+]

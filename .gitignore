@@ -3,7 +3,16 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
-.env
+.env*
+*.pem
+*.key
+*.crt
+*.pfx
+secrets/
+private/
+scan_reports/
+*.json.report
+*.log
 
 # Hardware / engineering
 hardware/**/*.step

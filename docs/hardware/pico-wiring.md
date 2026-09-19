@@ -25,47 +25,19 @@
 
 Baud 9600 `UART0`.
 
-## SPI — Two buses
+## SPI — Shared SPI0 Bus (TFT 2.4" + nRF24L01+ PA+LNA)
 
-### SPI1 → nRF24L01+PA+LNA (3.3V **only**)
+Both the 2.4" TFT display and nRF24L01+ share the `SPI0` bus lines (`SCK`, `MOSI`, `MISO`), with separate chip-select (`CS` / `CSN`) lines:
 
-| nRF24 | Pico |
-|-------|------|
-| VCC 3.3V | 3V3 (not 5V) |
-| GND | GND |
-| CE | **GP14** |
-| CSN | **GP13** `SPI1 CSn` |
-| SCK | **GP10** `SPI1 SCK` |
-| MOSI | **GP11** `SPI1 TX` |
-| MISO | **GP12** `SPI1 RX` |
-| IRQ | **GP15** (optional, INT) |
-
-`SPI1`.
-
-### SPI0 → 2.4" TFT SPI (ILI9341, 240×320)
-
-| TFT | Pico |
-|-----|------|
-| VCC 3.3V / 5V | 3V3 (if board has LDO) |
-| GND | GND |
-| SCK | **GP18** `SPI0 SCK` |
-| MOSI/SDI | **GP19** `SPI0 TX` |
-| MISO/SDO | **GP16** `SPI0 RX` (for touch/SD, else NC) |
-| CS | **GP17** `SPI0 CSn` |
-| DC | **GP20** |
-| RST | **GP21** |
-| BL (LED) | **GP22** (PWM) or 3V3 |
-| T_CS / T_IRQ (if touch) | GP26 / GP27 (touch SPI shared) |
-
-`SPI0`.
-
-## Extra Pins
-
-| Signal | Pico | Note |
-|--------|------|------|
-| MPU6050 INT | **GP2** | Data-ready interrupt |
-| VL53LOX XSHUT | **GP3** | Hold low to reset, high to run |
-| VL53LOX GPIO1 | GP4 | Optional threshold IRQ |
+| Signal / Pin | TFT 2.4" SPI | nRF24L01+ PA+LNA | Pico 2 W Pin | Function |
+|--------------|--------------|------------------|--------------|----------|
+| **SCK** | SCK | SCK | **GP18** (Pin 24) | Shared SPI0 Clock |
+| **MOSI** | MOSI/SDI | MOSI | **GP19** (Pin 25) | Shared SPI0 MOSI (TX) |
+| **MISO** | MISO/SDO | MISO | **GP16** (Pin 21) | Shared SPI0 MISO (RX) |
+| **CS / CSN** | CS (GP17, Pin 22) | CSN (GP20, Pin 26) | **GP17** / **GP20** | Independent Chip Selects |
+| **Control** | DC: **GP4** (Pin 6)<br>RST: **GP5** (Pin 7) | CE: **GP21** (Pin 27)<br>IRQ: **GP22** (Pin 29) | — | Device control & IRQ |
+| **Power** | VCC: 3V3 (Pin 36)<br>BL: 3V3 (Pin 36) | VCC: 3V3 (Pin 36, **3.3V only**) | **3V3** (Pin 36) | Logic & backlight |
+| **GND** | GND | GND | **GND** | Common Star GND |
 
 ## Summary Pin Map
 
@@ -74,26 +46,22 @@ Pico 2W            sipher peripherals
 ------             -------------------
 GP0  (UART0 TX) → GPS RX
 GP1  (UART0 RX) ← GPS TX
-GP2              → MPU INT
-GP3              → VL53 XSHUT
-GP8  (I2C0 SDA) ↔ MPU/PCA/INA/VL53 SDA
-GP9  (I2C0 SCL) ↔ MPU/PCA/INA/VL53 SCL
-GP10 (SPI1 SCK) → nRF SCK
-GP11 (SPI1 MOSI)→ nRF MOSI
-GP12 (SPI1 MISO)← nRF MISO
-GP13 (SPI1 CSn) → nRF CSN
-GP14             → nRF CE
-GP15             ← nRF IRQ
-GP16 (SPI0 MISO)← TFT SDO
+GP2              → MPU INT / I2C1 SDA
+GP3              → VL53 XSHUT / I2C1 SCL
+GP4              → TFT DC/RS
+GP5              → TFT RESET
+GP8  (I2C0 SDA) ↔ PCA/INA/VL53 SDA (alt)
+GP9  (I2C0 SCL) ↔ PCA/INA/VL53 SCL (alt)
+GP16 (SPI0 MISO)↔ Shared SPI0 MISO (TFT SDO & nRF MISO)
 GP17 (SPI0 CSn) → TFT CS
-GP18 (SPI0 SCK) → TFT SCK
-GP19 (SPI0 MOSI)→ TFT SDI
-GP20             → TFT DC
-GP21             → TFT RST
-GP22             → TFT BL
+GP18 (SPI0 SCK) → Shared SPI0 SCK (TFT SCK & nRF SCK)
+GP19 (SPI0 MOSI)→ Shared SPI0 MOSI (TFT SDI & nRF MOSI)
+GP20             → nRF CSN (Chip Select)
+GP21             → nRF CE (Enable)
+GP22             → nRF IRQ (Optional Interrupt)
 GND              → All GND common
-3V3              → All 3.3V logic
-VBUS (5V)        → PCA V+ / servo rail / TFT VCC if needed
+3V3              → All 3.3V logic + TFT BL + nRF VCC
+VBUS (5V)        → PCA V+ / servo rail / external UBEC
 ```
 
 ## Power notes
