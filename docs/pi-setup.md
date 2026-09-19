@@ -1,6 +1,6 @@
 # sipher — Raspberry Pi 4 (Quadruped Brain)
 
-Hostname `sipher` (`192.168.1.35/24` **static**), Ubuntu 24.04.4 LTS `noble` on Pi 4, `sipher/marin26`.
+Hostname `sipher` (`192.168.1.35/24` **static**), Ubuntu 24.04.4 LTS `noble` on Pi 4, user `sipher`.
 
 ## Network — static (done 2026-09-04)
 - `MAC 2c:cf:67:8d:0f:57` → `wlan0 192.168.1.35/24` `via 192.168.1.1`

@@ -55,7 +55,7 @@ def servo(cmd):
         tts("shutting down")
         print("shutdown triggered", flush=True)
         time.sleep(1)
-        subprocess.run(["bash","-c","echo marin26 | sudo -S shutdown -h now"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["sudo", "shutdown", "-h", "now"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 print("always on — say rotate / stop", flush=True)
 while True:
