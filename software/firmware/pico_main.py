@@ -151,103 +151,104 @@ def read_gps():
     return None
 
 # ---------------------------------------------------------------------------
-# TFT — ILI9341 via SPI0
+# TFT — ILI9341 via SPI0, actual pins per boot_logo.py/ili9341.py
+#   SCK=GP18, MOSI=GP19, MISO=GP16, CS=GP17, DC=GP4, RST=GP5
 # ---------------------------------------------------------------------------
-TFT_CS   = machine.Pin(16, machine.Pin.OUT)
-TFT_RST  = machine.Pin(20, machine.Pin.OUT)
-TFT_SPIVALUE = machine.SPI(0, baudrate=40_000_000, polarity=0, phase=0,
-                            sck=machine.Pin(17), mosi=machine.Pin(18), miso=machine.Pin(19))
+_TFT_CS = machine.Pin(17, machine.Pin.OUT)
+_TFT_RST = machine.Pin(5, machine.Pin.OUT)
+_TFT_DC = machine.Pin(4, machine.Pin.OUT)
+_TFT_SPI = None  # lazy init inside tft_init()
 
-def tft_init():
-    TFT_RST.value(0)
-    time.sleep_ms(1)
-    TFT_RST.value(1)
-    time.sleep_ms(1)
-    _tft_cmd(0x28)  # display off
-    _tft_cmd(0x11)  # sleep out
-    time.sleep_ms(120)
-    _tft_cmd(0x3A); _tft_data(b'\x55')  # 16-bit pixel
-    _tft_cmd(0x36); _tft_data(b'\x00')  # MIPI RGB
-    _tft_cmd(0x29)  # display on
+def _tft_init_spi():
+    global _TFT_SPI
+    if _TFT_SPI is not None:
+        return _TFT_SPI
+    try:
+        _TFT_SPI = machine.SPI(0, baudrate=40_000_000, polarity=0, phase=0,
+                                sck=machine.Pin(18), mosi=machine.Pin(19),
+                                miso=machine.Pin(16))
+    except Exception as e:
+        print(f"[pico] SPI init error: {e}", flush=True)
+        _TFT_SPI = None
+    return _TFT_SPI
 
 def _tft_cmd(c):
-    TFT_CS.value(0)
-    _tft_spi_write(b'\x00' + bytes([c & 0xFF]))
-    TFT_CS.value(1)
+    spi = _tft_init_spi()
+    if spi is None:
+        return
+    _TFT_CS.value(0)
+    _TFT_DC.value(0)
+    spi.write(bytes([c & 0xFF]))
+    _TFT_CS.value(1)
 
 def _tft_data(d):
-    TFT_CS.value(0)
-    _tft_spi_write(b'\x00' + d)
-    TFT_CS.value(1)
+    spi = _tft_init_spi()
+    if spi is None:
+        return
+    _TFT_CS.value(0)
+    _TFT_DC.value(1)
+    spi.write(d)
+    _TFT_CS.value(1)
 
-def _tft_spi_write(buf):
-    TFT_SPIVALUE.write(buf)
+def tft_init():
+    """Initialize TFT. Returns True/False. Must be called after boot_logo."""
+    print("[pico] tft_init start", flush=True)
+    try:
+        _TFT_RST.value(0)
+        time.sleep_ms(10)
+        _TFT_RST.value(1)
+        time.sleep_ms(10)
+        _tft_cmd(0x28)  # display off
+        _tft_cmd(0x11)  # sleep out
+        time.sleep_ms(120)
+        _tft_cmd(0x3A); _tft_data(b'\x55')  # 16-bit pixel
+        _tft_cmd(0x36); _tft_data(b'\x00')  # MIPI RGB
+        _tft_cmd(0x29)  # display on
+        time.sleep_ms(50)
+        print("[pico] tft_init OK", flush=True)
+        return True
+    except Exception as e:
+        print(f"[pico] tft_init FAIL: {e}", flush=True)
+        return False
 
 def tft_fill(color):
-    """Fill entire screen with RGB565 color."""
-    TFT_CS.value(0)
-    _tft_cmd(0x2A); _tft_data(b'\x00\x00\x00\xEF')  # column 0-319
-    _tft_cmd(0x2B); _tft_data(b'\x00\x00\x00\xEF')  # page 0-239
-    _tft_cmd(0x2C)  # write memory
-    pixel = struct.pack(">H", color & 0xFFFF)
-    for _ in range(320 * 240):
-        _tft_spi_write(pixel)
-    TFT_CS.value(1)
-
-def tft_rect(x, y, w, h, color):
-    """Draw a filled rectangle."""
-    TFT_CS.value(0)
-    _tft_cmd(0x2A); _tft_data(bytes([x >> 8, x & 0xFF, (x + w - 1) >> 8, (x + w - 1) & 0xFF]))
-    _tft_cmd(0x2B); _tft_data(bytes([y >> 8, y & 0xFF, (y + h - 1) >> 8, (y + h - 1) & 0xFF]))
+    spi = _tft_init_spi()
+    if spi is None:
+        return
+    _TFT_CS.value(0)
+    _TFT_DC.value(0)
+    _tft_cmd(0x2A); _tft_data(bytes([0, 0, 0x01, 0x3F]))
+    _tft_cmd(0x2B); _tft_data(bytes([0, 0, 0x00, 0xDF]))
     _tft_cmd(0x2C)
     pixel = struct.pack(">H", color & 0xFFFF)
-    for _ in range(w * h):
-        _tft_spi_write(pixel)
-    TFT_CS.value(1)
-
-def tft_line(x0, y0, x1, y1, color):
-    """Draw a line using Bresenham."""
-    dx = abs(x1 - x0)
-    dy = abs(y1 - y0)
-    sx = 1 if x0 < x1 else -1
-    sy = 1 if y0 < y1 else -1
-    err = dx - dy
-    pixel = struct.pack(">H", color & 0xFFFF)
-    while True:
-        tft_set_pixel(x0, y0, color)
-        if x0 == x1 and y0 == y1:
-            break
-        e2 = err * 2
-        if e2 > -dy:
-            err -= dy
-            x0 += sx
-        if e2 < dx:
-            err += dx
-            y0 += sy
+    for _ in range(320 * 240):
+        spi.write(pixel)
+    _TFT_CS.value(1)
 
 def tft_set_pixel(x, y, color):
-    """Set a single pixel."""
-    TFT_CS.value(0)
+    spi = _tft_init_spi()
+    if spi is None:
+        return
+    _TFT_CS.value(0)
+    _TFT_DC.value(0)
     _tft_cmd(0x2A); _tft_data(bytes([x >> 8, x & 0xFF, x >> 8, x & 0xFF]))
     _tft_cmd(0x2B); _tft_data(bytes([y >> 8, y & 0xFF, y >> 8, y & 0xFF]))
     _tft_cmd(0x2C)
-    _tft_spi_write(struct.pack(">H", color & 0xFFFF))
-    TFT_CS.value(1)
+    _TFT_DC.value(1)
+    spi.write(struct.pack(">H", color & 0xFFFF))
+    _TFT_CS.value(1)
 
 def tft_clear():
     tft_fill(0x0000)
 
 def tft_text(x, y, text, color=0xFFFF, size=1):
-    """Draw text at (x, y). Size 1 = normal, 2 = double (simple block font)."""
-    # Block font fallback — draw vertical bars for each character
-    for ch in text:
-        char_width = 6 * size
+    for ch in str(text):
+        cw = 6 * size
         for dy in range(8 * size):
-            for dx in range(char_width):
-                # Simple 6x8 font bitmap (just a placeholder — full font would be ~1KB)
-                if (dx < char_width // 2) and (dy < 8 * size):
+            for dx in range(cw):
+                if (dx < cw // 2) and (dy < 8 * size):
                     tft_set_pixel(x + dx, y + dy, color)
-        x += char_width + 1
+        x += cw + 1
 
 # ---------------------------------------------------------------------------
 # RTC / Time — set from Pi, report back
@@ -382,8 +383,9 @@ _dashboard_running = False
 # Main loop — read JSON lines from USB, dispatch, write JSON back
 # ---------------------------------------------------------------------------
 def main():
-    tft_init()
-    print(json.dumps({"version": "sipher-pico-main-v2", "ready": True}))
+    print("[pico] main() entered", flush=True)
+    tft_ok = tft_init()
+    print(json.dumps({"version": "sipher-pico-main-v2-corr", "tft": tft_ok, "ready": True}), flush=True)
     buf = b""
     while True:
         try:
