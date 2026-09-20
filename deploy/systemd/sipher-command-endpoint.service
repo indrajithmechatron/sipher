@@ -1,0 +1,22 @@
+[Unit]
+Description=Sipher command endpoint + dashboard HTTP server
+After=network-online.target sipher-bridge.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sipher
+Group=sipher
+WorkingDirectory=/home/sipher/sipher
+Environment=PYTHONPATH=/home/sipher/sipher/software
+Environment=SIPHER_PICO_SERIAL=/dev/ttyACM0
+Environment=SIPHER_PORT=8888
+Environment=PI_IP=192.168.1.35
+ExecStart=/usr/bin/python3 -m control.command_endpoint
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
