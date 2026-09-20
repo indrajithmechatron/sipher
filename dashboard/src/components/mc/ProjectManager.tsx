@@ -114,7 +114,7 @@ export function ProjectManager({
           </span>
           <div>
             <div className="font-mono text-[12px] tracking-[0.16em] text-foreground/90 uppercase">
-              Quadruped Mission Control
+              Sipher Mission Control
             </div>
             <div className="font-mono text-[10px] text-muted-foreground">
               Project Manager · v4.19.2 · ROS 2 humble

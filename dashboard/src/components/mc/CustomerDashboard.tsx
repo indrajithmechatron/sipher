@@ -1,7 +1,7 @@
 import { ArrowRight, BatteryMedium, Bot, CheckCircle2, Clock3, Gauge, MapPin, Thermometer, Wrench, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { Telemetry } from "./sim";
+import type { Telemetry } from "./sipher";
 
 function Metric({
   icon: Icon,
@@ -50,7 +50,7 @@ export function CustomerDashboard({
             <Bot className="size-4" />
           </span>
           <div>
-            <div className="text-sm font-medium tracking-[0.12em] text-foreground uppercase">Quadruped Mission Control</div>
+            <div className="text-sm font-medium tracking-[0.12em] text-foreground uppercase">            Sipher Mission Control</div>
             <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">Customer operations · spot-alpha</div>
           </div>
         </div>

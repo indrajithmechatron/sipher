@@ -57,58 +57,59 @@ export const EXPLORER: TreeNode[] = [
     id: "robot",
     label: "Robot",
     children: [
-      { id: "r-kine", label: "Kinematics", meta: "12 DoF" },
-      { id: "r-imu", label: "IMU / State Estimator", meta: "400 Hz", tone: "ok" },
-      { id: "r-gait", label: "Gait Controller", meta: "trot", tone: "signal" },
-      { id: "r-power", label: "Power Bus", meta: "58.2 V" },
+      { id: "r-pico", label: "Pico 2 W", meta: "MicroPython 3.4", tone: "ok" },
+      { id: "r-pi", label: "Raspberry Pi 4", meta: "sipher", tone: "ok" },
+      { id: "r-gait", label: "Gait Controller", meta: "12 DoF", tone: "signal" },
       { id: "r-safety", label: "Safety Envelope", meta: "armed", tone: "warn" },
+    ],
+  },
+  {
+    id: "sensors",
+    label: "Sensors",
+    children: [
+      { id: "s-mpu", label: "MPU6050", meta: "I2C1 0x68", tone: "ok" },
+      { id: "s-ina", label: "INA219", meta: "I2C0 0x41", tone: "ok" },
+      { id: "s-pca", label: "PCA9685", meta: "I2C0 0x40", tone: "ok" },
+      { id: "s-vl", label: "VL53L0X", meta: "I2C0 0x29", tone: "ok" },
+      { id: "s-gps", label: "NEO-6M GPS", meta: "UART GP0/1", tone: "muted" },
+    ],
+  },
+  {
+    id: "peripherals",
+    label: "Peripherals",
+    children: [
+      { id: "p-tft", label: "ILI9341 TFT", meta: "SPI0 240x320", tone: "ok" },
+      { id: "p-nrf", label: "nRF24L01+", meta: "SPI0 CSN:GP20", tone: "muted" },
+      { id: "p-servo", label: "12x Servos", meta: "PCA9685 PWM" },
     ],
   },
   {
     id: "missions",
     label: "Missions",
     children: [
-      { id: "m-1", label: "perimeter_sweep.mission", meta: "running", tone: "ok" },
-      { id: "m-2", label: "stair_traversal.mission" },
-      { id: "m-3", label: "thermal_inspect.mission" },
-      { id: "m-4", label: "dock_return.mission" },
+      { id: "m-1", label: "sensor_sweep.mission", meta: "running", tone: "ok" },
+      { id: "m-2", label: "walk_test.mission" },
+      { id: "m-3", label: "calibrate.servo" },
+      { id: "m-4", label: "tft_demo.mission" },
     ],
   },
   {
     id: "agents",
-    label: "AI Agents",
+    label: "Sensor Agents",
     children: [
-      { id: "a-nav", label: "navigator", meta: "active", tone: "signal" },
-      { id: "a-per", label: "perception", meta: "active", tone: "signal" },
-      { id: "a-pln", label: "task-planner", meta: "idle" },
-      { id: "a-saf", label: "safety-critic", meta: "watching", tone: "warn" },
+      { id: "a-mpu", label: "imu-reader", meta: "active", tone: "signal" },
+      { id: "a-ina", label: "power-monitor", meta: "active", tone: "signal" },
+      { id: "a-vl", label: "tof-scanner", meta: "active", tone: "signal" },
+      { id: "a-gps", label: "gps-parser", meta: "idle" },
+      { id: "a-pca", label: "servo-controller", meta: "active", tone: "signal" },
     ],
   },
   {
-    id: "ros2",
-    label: "ROS 2 Graph",
+    id: "buses",
+    label: "I2C Buses",
     children: [
-      { id: "n-1", label: "/locomotion_ctrl", meta: "42 topics" },
-      { id: "n-2", label: "/depth_front", meta: "30 fps" },
-      { id: "n-3", label: "/lidar_360", meta: "10 Hz" },
-      { id: "n-4", label: "/tf_broadcaster" },
-    ],
-  },
-  {
-    id: "mcp",
-    label: "MCP Servers",
-    children: [
-      { id: "s-1", label: "fleet-telemetry", meta: "connected", tone: "ok" },
-      { id: "s-2", label: "site-maps", meta: "connected", tone: "ok" },
-      { id: "s-3", label: "maintenance-log", meta: "degraded", tone: "warn" },
-    ],
-  },
-  {
-    id: "logs",
-    label: "Recordings",
-    children: [
-      { id: "l-1", label: "2026-08-15_sweep.mcap", meta: "1.8 GB" },
-      { id: "l-2", label: "2026-08-14_stairs.mcap", meta: "740 MB" },
+      { id: "b-0", label: "I2C0 (GP8/GP9)", meta: "PCA INA VL53", tone: "ok" },
+      { id: "b-1", label: "I2C1 (GP2/GP3)", meta: "MPU6050", tone: "ok" },
     ],
   },
 ];
@@ -223,38 +224,34 @@ export const JOINTS = [
 ];
 
 export const TERMINALS = [
-  { id: "ros", title: "ros2 · bash", host: "spot-alpha" },
-  { id: "agent", title: "agent-trace", host: "orchestrator" },
-  { id: "build", title: "colcon build", host: "workstation" },
+  { id: "sensors", title: "sensors", host: "pico-2w" },
+  { id: "commands", title: "commands", host: "pi-bridge" },
+  { id: "agent", title: "agent-trace", host: "sipher" },
   { id: "problems", title: "Problems", host: "" },
 ];
 
 export const TERMINAL_LINES: Record<string, { c: string; text: string }[]> = {
-  ros: [
-    { c: "muted", text: "$ ros2 topic hz /locomotion_ctrl/state" },
-    { c: "fg", text: "average rate: 399.812" },
-    { c: "fg", text: "  min: 0.002s max: 0.003s std dev: 0.00011s window: 400" },
-    { c: "muted", text: "$ ros2 node list --namespace /perception" },
-    { c: "fg", text: "/perception/depth_front  /perception/lidar_360  /perception/fusion" },
-    { c: "warn", text: "[WARN] [1755331481.0] tf lookup 'odom'→'base_link' 42ms behind" },
+  sensors: [
+    { c: "muted", text: "$ GET /api/sensors" },
+    { c: "fg", text: "mpu: [0.12, -0.98, 9.78, 0.5, -1.2, 0.3]" },
+    { c: "fg", text: "ina: { voltage_v: 12.4, current_ma: 340 }" },
+    { c: "fg", text: "vl53_mm: 287" },
+    { c: "muted", text: "$ _" },
+  ],
+  commands: [
+    { c: "muted", text: "$ {\"cmd\":\"sensors\"}" },
+    { c: "signal", text: "polling sensors at 1 Hz..." },
     { c: "muted", text: "$ _" },
   ],
   agent: [
-    { c: "signal", text: "▸ navigator  plan_path        312ms   ok" },
-    { c: "signal", text: "▸ perception segment_frame    88ms    ok" },
-    { c: "warn", text: "▸ safety-critic slope_limit    41ms    ESCALATED → operator" },
-    { c: "fg", text: "  context 18,204 tok · cache hit 71% · $0.0042" },
-    { c: "muted", text: "  awaiting operator acknowledgement…" },
-  ],
-  build: [
-    { c: "fg", text: "Starting >>> quad_locomotion" },
-    { c: "fg", text: "Finished <<< quad_locomotion [4.12s]" },
-    { c: "fg", text: "Starting >>> quad_perception" },
-    { c: "ok", text: "Summary: 12 packages finished [18.4s]" },
+    { c: "signal", text: "▸ imu-reader   i2c.read       22ms    ok" },
+    { c: "signal", text: "▸ power-monitor i2c.read       18ms    ok" },
+    { c: "signal", text: "▸ tof-scanner  i2c.read       35ms    ok" },
+    { c: "signal", text: "▸ gps-parser   uart.read       —  idle" },
+    { c: "signal", text: "▸ servo-ctrl   i2c.write      12ms    ok" },
+    { c: "muted", text: "  5 agents · 0 alerts" },
   ],
   problems: [
-    { c: "warn", text: "⚠ gait_controller.cpp:214  unchecked slip recovery return value" },
-    { c: "danger", text: "✕ mcp/maintenance-log  handshake timeout (3 retries)" },
-    { c: "muted", text: "ℹ mission perimeter_sweep: 2 waypoints outside mapped area" },
+    { c: "muted", text: "No active problems" },
   ],
 };

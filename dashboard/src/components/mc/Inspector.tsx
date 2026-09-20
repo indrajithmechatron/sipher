@@ -1,7 +1,7 @@
 import { AlertTriangle } from "lucide-react";
 import { Chip, Dot, Field, PanelHeader } from "./chrome";
 import { cn } from "@/lib/utils";
-import type { Telemetry } from "./sim";
+import type { Telemetry } from "./sipher";
 import { EventTimeline } from "./AgentOps";
 
 export type Selection = { kind: "node" | "agent" | "joint"; id: string; path: string[] };
@@ -111,20 +111,19 @@ function ContextBody({ sel, tele }: { sel: Selection; tele: Telemetry }) {
     <>
       <Section title="State" />
       <Field label="Mode" value="AUTONOMOUS" tone="text-signal" />
-      <Field label="Gait" value="careful_trot" />
+      <Field label="Gait" value="idle" />
       <Field label="Velocity" value={`${tele.velocity.toFixed(2)} m/s`} />
-      <Field label="Battery" value={`${tele.battery.toFixed(0)}% · ${tele.minutes} min`} />
-      <Field label="Bus voltage" value={`${tele.bus.toFixed(1)} V`} />
-      <Field label="Temp (core)" value={`${tele.tempCore.toFixed(1)} °C`} tone={tele.tempCore > 55 ? "text-warn" : ""} />
+      <Field label="Battery" value={`${tele.bus.toFixed(2)} V`} tone={tele.bus < 5 ? "text-warn" : "text-ok"} />
+      <Field label="Bus voltage" value={`${tele.bus.toFixed(2)} V`} />
+      <Field label="Temp (core)" value={`${tele.tempCore.toFixed(1)} C`} tone={tele.tempCore > 60 ? "text-warn" : ""} />
+      <Field label="ToF height" value={`${tele.contacts >= 4 ? "< 500" : tele.contacts >= 3 ? "500-1000" : "> 1000"} mm`} />
       <Section title="Safety Envelope" />
-      <Field label="Slope limit" value="18.0°" />
-      <Field label="Current pitch" value={`${tele.pitch.toFixed(1)}°`} tone={tele.pitch > 18 ? "text-warn" : "text-ok"} />
+      <Field label="Slope limit" value="18.0 deg" />
+      <Field label="Current pitch" value={`${tele.pitch.toFixed(1)} deg`} tone={tele.pitch > 18 ? "text-warn" : "text-ok"} />
       <Field label="E-stop" value="ARMED" tone="text-ok" />
-      <Field label="Geofence" value="sector_b" />
-      <Section title="Compute" />
-      <Field label="CPU" value={`${tele.cpu}%`} />
-      <Field label="GPU" value={`${tele.gpu}%`} />
-      <Field label="Inference" value={`${tele.inferenceMs.toFixed(1)} ms`} />
+      <Section title="Sensors" />
+      <Field label="I2C0" value="PCA INA VL53" />
+      <Field label="I2C1" value="MPU6050" />
       <Field label="Control loop" value={`${tele.loopHz} Hz`} />
     </>
   );
