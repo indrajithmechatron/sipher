@@ -385,7 +385,7 @@ _dashboard_running = False
 def main():
     print("[pico] main() entered", flush=True)
     tft_ok = tft_init()
-    print(json.dumps({"version": "sipher-pico-main-v2-corr", "tft": tft_ok, "ready": True}), flush=True)
+    print(_json.dumps({"version": "sipher-pico-main-v2-corr", "tft": tft_ok, "ready": True}), flush=True)
     buf = b""
     while True:
         try:
@@ -402,7 +402,7 @@ def main():
                 try:
                     req = _json.loads(line)
                 except Exception:
-                    print(json.dumps({"error": "bad json"}))
+                    print(_json.dumps({"error": "bad json"}), flush=True)
                     continue
                 cmd = req.get("cmd", "")
                 handler = CMD_MAP.get(cmd)
@@ -424,7 +424,7 @@ def main():
                 print(_json.dumps(sensors))
                 sys.stdout.flush()
         except Exception as e:
-            print(json.dumps({"error": str(e)}))
+            print(_json.dumps({"error": str(e)}), flush=True)
             sys.stdout.flush()
             buf = b""
             time.sleep_ms(100)
