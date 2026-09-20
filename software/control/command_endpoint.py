@@ -35,72 +35,32 @@ LOG_FILE = os.environ.get("SIPHER_LOG", "/home/sipher/deploy/pull.log")
 REGISTERED_COMMANDS = set()  # commands that have been run (for audit)
 
 # ---------------------------------------------------------------------------
-# Pico serial reader — background thread that keeps latest sensor snapshot
+# Sensor data — fetched from bridge HTTP endpoint (port 5001)
 # ---------------------------------------------------------------------------
-_pico_buffer = ""
-_pico_lock = threading.Lock()
-_pico_snapshots = []  # last N sensor JSON lines
-_snapshot_lock = threading.Lock()
-MAX_SNAPSHOTS = 50
+_latest_sensor = {}
+_sensor_lock = threading.Lock()
+BRIDGE_SENSOR_URL = os.environ.get("SIPHER_BRIDGE_SENSOR_URL", "http://localhost:5001/sensor")
 
-def _pico_reader():
-    """Continuously read JSON lines from Pico serial, keep latest snapshot."""
-    global _pico_buffer
-    try:
-        ser = serial.Serial(PICO_SERIAL, PICO_BAUD, timeout=1.0)
-    except Exception as e:
-        print(f"[pico] cannot open {PICO_SERIAL}: {e}", flush=True)
-        return
-    print(f"[pico] reading from {PICO_SERIAL}@{PICO_BAUD}", flush=True)
-    buf = b""
+def _sensor_poller():
+    """Poll bridge /sensor endpoint every 2s for latest snapshot."""
+    import urllib.request
     while True:
         try:
-            ch = ser.read(1)
-            if not ch:
-                time.sleep(0.01)
-                continue
-            buf += ch
-            if ch == b'\n':
-                line = buf.decode().strip()
-                buf = b""
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                # Keep sensor snapshots (anything with 'mpu', 'vl53', 'ina', 'gps', or 'cmd')
-                if any(k in data for k in ("mpu", "vl53", "ina", "gps", "cmd")):
-                    with _snapshot_lock:
-                        _pico_snapshots.append(data)
-                        if len(_pico_snapshots) > MAX_SNAPSHOTS:
-                            _pico_snapshots = _pico_snapshots[-MAX_SNAPSHOTS:]
-        except serial.SerialException:
-            print("[pico] serial disconnected, retrying in 5s...", flush=True)
-            time.sleep(5)
-            try:
-                ser.close()
-                ser.open()
-            except Exception:
-                time.sleep(5)
-
-_pico_thread = threading.Thread(target=_pico_reader, daemon=True)
-_pico_thread.start()
+            with urllib.request.urlopen(BRIDGE_SENSOR_URL, timeout=3) as resp:
+                data = json.loads(resp.read().decode())
+                if data:
+                    with _sensor_lock:
+                        _latest_sensor.update(data)
+        except Exception:
+            pass
+        time.sleep(2)
 
 def get_latest_sensor():
-    """Return the most recent sensor snapshot from Pico, or a default."""
-    with _snapshot_lock:
-        if _pico_snapshots:
-            return _pico_snapshots[-1]
-    return {
-        "cmd": "dashboard_tick",
-        "mpu": None,
-        "vl53_mm": None,
-        "ina": {"shunt_uv": None, "bus_v": None, "current_ma_est": None},
-        "gps": None,
-        "i2c_scan": [],
-        "ts": int(time.time() * 1000),
-    }
+    with _sensor_lock:
+        return dict(_latest_sensor)
+
+_sensor_thread = threading.Thread(target=_sensor_poller, daemon=True)
+_sensor_thread.start()
 
 # ---------------------------------------------------------------------------
 # Deploy script helper — runs update.sh and returns output
