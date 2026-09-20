@@ -15,7 +15,7 @@ Single-owner access to `/dev/ttyACM0`, command validation, safety state machine,
 
 ## Files
 
-- `pico_bridge.py` — hardware bridge (serial owner, JSON transport)
+- `pico_bridge.py` — USB serial ↔ TCP bridge: reads JSON sensor lines from Pico, broadcasts to TCP clients on port 5000, accepts commands from clients and forwards to Pico. Also serves HTTP on port 5001 (`GET /sensor`, `GET /health`).
 - `state_machine.py` — robot state (idle / moving / stopped / e-stop)
 - `command_validator.py` — validates incoming requests
 
