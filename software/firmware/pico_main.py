@@ -3,7 +3,8 @@ pico_main.py — Sipher Pico 2 W unified firmware
 Hardware:
   I2C1  GP2=SDA GP3=SCL  (MPU6050@0x68, VL53L0X@0x29, INA219@0x41, PCA9685@0x40)
   UART0 GP0=TX  GP1=RX    (NEO-6M GPS 9600 baud)
-  SPI0  GP16=CS GP17=SCK GP18=MOSI GP19=MISO  (ILI9341 TFT, GP20=reset)
+  SPI0  GP16=MISO GP17=CS(TFT) GP18=SCK GP19=MOSI  (ILI9341 TFT)
+        GP20=CSN(nRF) GP21=CE(nRF) GP22=IRQ(nRF)   (nRF24L01+ PA+LNA)
   USB   CDC port → /dev/ttyACM0 on Pi (115200)
 Commands from Pi (single JSON line over USB-CDC, newline-terminated):
   {"cmd":"scan"}               → I2C device scan
@@ -17,6 +18,11 @@ Commands from Pi (single JSON line over USB-CDC, newline-terminated):
   {"cmd":"text","x":10,"y":10,"text":"Hello","color":0xFFFF,"size":1}
   {"cmd":"clear"}
   {"cmd":"dashboard","interval_ms":1000}  → start/stop live dashboard loop
+  {"cmd":"nrf_init","channel":76,"rate":250000,"pa":"MAX"}
+  {"cmd":"nrf_send","data":"hello","pipe":"e1f0f0f0f0"}
+  {"cmd":"nrf_recv"}           → read one RX payload
+  {"cmd":"nrf_status"}         → radio status string
+  {"cmd":"nrf_test","count":10,"delay_ms":1000}
   {"cmd":"ping"}              → {"cmd":"pong","t":<ms>}
   {"cmd":"time","set":1763640000}  → set RTC from Pi
   {"cmd":"time"}              → {"cmd":"time","t":<unix>,"hms":"HH:MM:SS"}
@@ -251,6 +257,78 @@ def tft_text(x, y, text, color=0xFFFF, size=1):
         x += cw + 1
 
 # ---------------------------------------------------------------------------
+# nRF24L01+ PA+LNA — shares SPI0 with TFT (hardware CS handles arbitration)
+#   CSN=GP20, CE=GP21, IRQ=GP22 (optional)
+# ---------------------------------------------------------------------------
+_nrf = None
+
+def nrf_init(channel=76, rate=250000, pa="MAX"):
+    global _nrf
+    try:
+        from nrf24l01 import NRF24L01
+        spi = _tft_init_spi()  # reuse same SPI0 bus
+        if spi is None:
+            return {"error": "SPI not available"}
+        _nrf = NRF24L01(spi, cs=20, ce=21, channel=channel, data_rate=rate, pa_level=pa)
+        return {"nrf_init": True, "channel": channel, "rate": rate, "pa": pa}
+    except Exception as e:
+        return {"nrf_init": False, "error": str(e)}
+
+def nrf_send(data, pipe_addr="e1f0f0f0f0"):
+    if _nrf is None:
+        return {"error": "nrf not initialized"}
+    try:
+        if isinstance(data, str):
+            data = data.encode()
+        addr = bytes.fromhex(pipe_addr)
+        _nrf.open_tx_pipe(addr)
+        ok = _nrf.send(data)
+        return {"nrf_send": ok, "bytes": len(data)}
+    except Exception as e:
+        return {"nrf_send": False, "error": str(e)}
+
+def nrf_recv():
+    if _nrf is None:
+        return {"error": "nrf not initialized"}
+    try:
+        _nrf.start_listening()
+        data = _nrf.recv()
+        if data:
+            return {"nrf_recv": data.hex(), "len": len(data)}
+        return {"nrf_recv": None}
+    except Exception as e:
+        return {"nrf_recv": None, "error": str(e)}
+
+def nrf_status_cmd():
+    if _nrf is None:
+        return {"nrf_status": "not initialized"}
+    return {"nrf_status": _nrf.status_str()}
+
+def nrf_test(count=10, delay_ms=1000):
+    if _nrf is None:
+        return {"error": "nrf not initialized"}
+    try:
+        _nrf.open_tx_pipe(b"\xe1\xf0\xf0\xf0\xf0")
+        results = {"sent": 0, "acked": 0, "failed": 0, "latencies": []}
+        for i in range(count):
+            msg = f"test_{i:04d}".encode()
+            t0 = time.ticks_ms()
+            ok = _nrf.send(msg)
+            lat = time.ticks_diff(time.ticks_ms(), t0)
+            results["latencies"].append(lat)
+            if ok:
+                results["acked"] += 1
+            else:
+                results["failed"] += 1
+            results["sent"] += 1
+            time.sleep_ms(delay_ms)
+        avg = sum(results["latencies"]) / len(results["latencies"]) if results["latencies"] else 0
+        results["avg_latency_ms"] = round(avg, 1)
+        return results
+    except Exception as e:
+        return {"nrf_test": False, "error": str(e)}
+
+# ---------------------------------------------------------------------------
 # RTC / Time — set from Pi, report back
 # ---------------------------------------------------------------------------
 _rtc = machine.RTC()
@@ -374,6 +452,11 @@ CMD_MAP = {
     "time": (lambda p: cmd_set_time(p.get("set", 0)) if "set" in p else cmd_get_time()),
     "status": (lambda p: cmd_status()),
     "led": (lambda p: cmd_led(p.get("on", False))),
+    "nrf_init": (lambda p: nrf_init(p.get("channel", 76), p.get("rate", 250000), p.get("pa", "MAX"))),
+    "nrf_send": (lambda p: nrf_send(p.get("data", ""), p.get("pipe", "e1f0f0f0f0"))),
+    "nrf_recv": (lambda p: nrf_recv()),
+    "nrf_status": (lambda p: nrf_status_cmd()),
+    "nrf_test": (lambda p: nrf_test(p.get("count", 10), p.get("delay_ms", 1000))),
 }
 
 _dashboard_interval = 0
@@ -415,17 +498,14 @@ def main():
                     # Passthrough: echo back with timestamp (useful for GPS raw passthrough)
                     resp = {"echo": req, "ts": time.ticks_ms()}
                 print(_json.dumps(resp))
-                sys.stdout.flush()
             # Dashboard loop: if running, emit sensor snapshots
             if _dashboard_running and _dashboard_interval > 0:
                 time.sleep_ms(max(0, _dashboard_interval - 10))
                 sensors = cmd_sensors()
                 sensors["cmd"] = "dashboard_tick"
                 print(_json.dumps(sensors))
-                sys.stdout.flush()
         except Exception as e:
             print(_json.dumps({"error": str(e)}))
-            sys.stdout.flush()
             buf = b""
             time.sleep_ms(100)
 
