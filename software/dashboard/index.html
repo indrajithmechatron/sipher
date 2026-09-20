@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sipher Mission Control</title>
+<style>
+  :root {
+    --bg: #0a0a0a; --card: #141414; --border: #2a2a2a;
+    --text: #e0e0e0; --dim: #666; --accent: #4fc3f7;
+    --green: #4caf50; --yellow: #ff9800; --red: #f44336;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; background: var(--bg); color: var(--text); font-size: 13px; overflow-x: hidden; }
+
+  /* --- Top Bar --- */
+  .topbar {
+    display: flex; align-items: center; gap: 16px;
+    padding: 10px 20px; background: #111; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .topbar .logo { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: 1px; }
+  .topbar .logo span { color: var(--dim); font-weight: 400; }
+  .topbar .status-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 12px; font-size: 11px;
+    background: #1a1a1a; border: 1px solid var(--border);
+  }
+  .topbar .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .topbar .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .topbar .dot.off { background: var(--red); }
+  .topbar .spacer { flex: 1; }
+  .topbar .metric { color: var(--dim); font-size: 11px; }
+  .topbar .metric b { color: var(--text); }
+
+  /* --- Main Grid --- */
+  .main { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; gap: 12px; padding: 12px 20px; }
+  @media (max-width: 900px) { .main { grid-template-columns: 1fr; } }
+
+  /* --- Cards --- */
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px; position: relative;
+  }
+  .card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  .card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); }
+  .card-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: #1a1a1a; border: 1px solid var(--border); color: var(--dim); }
+
+  /* --- Quadruped SVG --- */
+  .quad-panel { grid-column: 1; grid-row: 1; min-height: 340px; display: flex; flex-direction: column; }
+  .quad-panel svg { flex: 1; width: 100%; }
+  .quad-stats { display: flex; gap: 16px; margin-top: 10px; }
+  .quad-stat { font-size: 11px; color: var(--dim); }
+  .quad-stat b { color: var(--text); font-size: 13px; display: block; margin-top: 2px; }
+
+  /* --- Sensor Panel --- */
+  .sensor-panel { grid-column: 2; grid-row: 1; }
+  .sensor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .sensor-item { background: #1a1a1a; border-radius: 6px; padding: 10px; }
+  .sensor-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); margin-bottom: 4px; }
+  .sensor-value { font-size: 18px; font-weight: 600; color: var(--text); }
+  .sensor-unit { font-size: 11px; color: var(--dim); margin-left: 3px; }
+  .sensor-sub { font-size: 11px; color: #555; margin-top: 3px; }
+
+  /* --- Joint Controls --- */
+  .joint-panel { grid-column: 1; grid-row: 2; }
+  .joint-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .joint-group { background: #1a1a1a; border-radius: 6px; padding: 10px; }
+  .joint-group-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); margin-bottom: 8px; text-align: center; }
+  .joint-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .joint-row:last-child { margin-bottom: 0; }
+  .joint-label { font-size: 10px; color: var(--dim); min-width: 36px; text-align: right; }
+  .joint-slider { flex: 1; height: 4px; -webkit-appearance: none; appearance: none; background: #333; border-radius: 2px; outline: none; }
+  .joint-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); cursor: pointer; }
+  .joint-val { font-size: 11px; color: var(--text); min-width: 28px; text-align: center; font-variant-numeric: tabular-nums; }
+
+  /* --- System Panel --- */
+  .sys-panel { grid-column: 2; grid-row: 2; }
+  .sys-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .sys-item { background: #1a1a1a; border-radius: 6px; padding: 10px; }
+  .sys-item.full { grid-column: 1 / -1; }
+  .sys-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); margin-bottom: 4px; }
+  .sys-value { font-size: 13px; color: var(--text); word-break: break-all; }
+
+  /* --- Buttons --- */
+  .btn {
+    background: #1a1a1a; color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 14px; font-size: 11px; cursor: pointer;
+    font-family: inherit; transition: background 0.15s;
+  }
+  .btn:hover { background: #252525; }
+  .btn.primary { background: #1565c0; border-color: #1565c0; }
+  .btn.primary:hover { background: #1976d2; }
+  .btn.danger { background: #b71c1c; border-color: #b71c1c; }
+  .btn.danger:hover { background: #c62828; }
+  .btn-group { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+
+  /* --- Terminal Log --- */
+  .log-panel { padding: 0 20px 12px; }
+  .log-box {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; max-height: 120px; overflow-y: auto; font-size: 11px;
+    color: #888; line-height: 1.5;
+  }
+  .log-box .ts { color: #555; }
+  .log-box .ok { color: var(--green); }
+  .log-box .warn { color: var(--yellow); }
+  .log-box .err { color: var(--red); }
+
+  /* --- Scrollbar --- */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- ===== TOP BAR ===== -->
+<div class="topbar">
+  <div class="logo">SIPHER<span>MC</span></div>
+  <div class="status-pill">
+    <div class="dot" id="conn-dot"></div>
+    <span id="conn-text">connecting</span>
+  </div>
+  <div class="metric">ping <b id="latency">—</b>ms</div>
+  <div class="spacer"></div>
+  <div class="metric">uptime <b id="uptime">—</b></div>
+  <div class="metric">fw <b id="fw-ver">—</b></div>
+  <div class="metric">pi <b id="pi-ip">—</b></div>
+</div>
+
+<!-- ===== MAIN GRID ===== -->
+<div class="main">
+
+  <!-- Quadruped Visualization -->
+  <div class="card quad-panel">
+    <div class="card-header">
+      <span class="card-title">Quadruped</span>
+      <span class="card-badge" id="quad-mode">top view</span>
+    </div>
+    <svg id="quad-svg" viewBox="0 0 420 260" xmlns="http://www.w3.org/2000/svg">
+      <!-- Body -->
+      <rect x="130" y="80" width="160" height="100" rx="12" fill="#1a1a1a" stroke="#333" stroke-width="1.5"/>
+      <text x="210" y="135" text-anchor="middle" fill="#555" font-size="11" font-family="monospace">SIPHER</text>
+      <!-- Leg groups: FL FR RL RR -->
+      <g id="leg-fl" transform="translate(140,90)">
+        <line x1="0" y1="0" x2="-40" y2="-45" stroke="#4fc3f7" stroke-width="3" stroke-linecap="round" id="fl-thigh"/>
+        <line x1="-40" y1="-45" x2="-65" y2="-80" stroke="#4fc3f7" stroke-width="2.5" stroke-linecap="round" id="fl-calf"/>
+        <circle cx="-65" cy="-80" r="3" fill="#4fc3f7"/>
+        <text x="-55" y="-85" fill="#4fc3f7" font-size="9" font-family="monospace">FL</text>
+      </g>
+      <g id="leg-fr" transform="translate(280,90)">
+        <line x1="0" y1="0" x2="40" y2="-45" stroke="#4fc3f7" stroke-width="3" stroke-linecap="round" id="fr-thigh"/>
+        <line x1="40" y1="-45" x2="65" y2="-80" stroke="#4fc3f7" stroke-width="2.5" stroke-linecap="round" id="fr-calf"/>
+        <circle cx="65" cy="-80" r="3" fill="#4fc3f7"/>
+        <text x="55" y="-85" fill="#4fc3f7" font-size="9" font-family="monospace">FR</text>
+      </g>
+      <g id="leg-rl" transform="translate(140,170)">
+        <line x1="0" y1="0" x2="-40" y2="45" stroke="#81c784" stroke-width="3" stroke-linecap="round" id="rl-thigh"/>
+        <line x1="-40" y1="45" x2="-65" y2="80" stroke="#81c784" stroke-width="2.5" stroke-linecap="round" id="rl-calf"/>
+        <circle cx="-65" cy="80" r="3" fill="#81c784"/>
+        <text x="-55" y="92" fill="#81c784" font-size="9" font-family="monospace">RL</text>
+      </g>
+      <g id="leg-rr" transform="translate(280,170)">
+        <line x1="0" y1="0" x2="40" y2="45" stroke="#81c784" stroke-width="3" stroke-linecap="round" id="rr-thigh"/>
+        <line x1="40" y1="45" x2="65" y2="80" stroke="#81c784" stroke-width="2.5" stroke-linecap="round" id="rr-calf"/>
+        <circle cx="65" cy="80" r="3" fill="#81c784"/>
+        <text x="55" y="92" fill="#81c784" font-size="9" font-family="monospace">RR</text>
+      </g>
+      <!-- Ground contact indicators -->
+      <g id="contacts" opacity="0.4">
+        <circle cx="75" cy="10" r="4" fill="#4caf50" id="c-fl"/>
+        <circle cx="345" cy="10" r="4" fill="#4caf50" id="c-fr"/>
+        <circle cx="75" cy="250" r="4" fill="#4caf50" id="c-rl"/>
+        <circle cx="345" cy="250" r="4" fill="#4caf50" id="c-rr"/>
+      </g>
+    </svg>
+    <div class="quad-stats">
+      <div class="quad-stat">pitch<b id="q-pitch">0.0</b></div>
+      <div class="quad-stat">roll<b id="q-roll">0.0</b></div>
+      <div class="quad-stat">yaw<b id="q-yaw">0.0</b></div>
+      <div class="quad-stat">height<b id="q-height">—</b></div>
+    </div>
+  </div>
+
+  <!-- Sensors -->
+  <div class="card sensor-panel">
+    <div class="card-header">
+      <span class="card-title">Sensors</span>
+      <span class="card-badge" id="sensor-rate">1 Hz</span>
+    </div>
+    <div class="sensor-grid">
+      <div class="sensor-item">
+        <div class="sensor-label">IMU (MPU6050)</div>
+        <div class="sensor-value" id="s-ax">—<span class="sensor-unit">mg</span></div>
+        <div class="sensor-sub">ax <span id="s-ay">—</span> ay <span id="s-az">—</span> az</div>
+        <div class="sensor-sub">gx <span id="s-gx">—</span> gy <span id="s-gy">—</span> gz <span id="s-gz">—</span></div>
+      </div>
+      <div class="sensor-item">
+        <div class="sensor-label">ToF (VL53L0X)</div>
+        <div class="sensor-value" id="s-vl">—<span class="sensor-unit">mm</span></div>
+        <div class="sensor-sub" id="s-vl-status">waiting</div>
+      </div>
+      <div class="sensor-item">
+        <div class="sensor-label">Power (INA219)</div>
+        <div class="sensor-value" id="s-v">—<span class="sensor-unit">V</span></div>
+        <div class="sensor-sub">current <span id="s-ma">—</span> mA</div>
+      </div>
+      <div class="sensor-item">
+        <div class="sensor-label">GPS (NEO-6M)</div>
+        <div class="sensor-value" id="s-gps">—</div>
+        <div class="sensor-sub" id="s-gps-coord">no fix</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Joint Controls -->
+  <div class="card joint-panel">
+    <div class="card-header">
+      <span class="card-title">Joint Control</span>
+      <div>
+        <button class="btn" onclick="centerAll()">Center All</button>
+        <button class="btn danger" onclick="relaxAll()">Relax</button>
+      </div>
+    </div>
+    <div class="joint-grid" id="joint-grid"></div>
+  </div>
+
+  <!-- System -->
+  <div class="card sys-panel">
+    <div class="card-header">
+      <span class="card-title">System</span>
+    </div>
+    <div class="sys-grid">
+      <div class="sys-item">
+        <div class="sys-label">I2C0 (PCA/INA/VL)</div>
+        <div class="sys-value" id="sys-i2c0">—</div>
+      </div>
+      <div class="sys-item">
+        <div class="sys-label">I2C1 (MPU)</div>
+        <div class="sys-value" id="sys-i2c1">—</div>
+      </div>
+      <div class="sys-item">
+        <div class="sys-label">Pico Firmware</div>
+        <div class="sys-value" id="sys-fw">—</div>
+      </div>
+      <div class="sys-item">
+        <div class="sys-label">Free Memory</div>
+        <div class="sys-value" id="sys-mem">—</div>
+      </div>
+      <div class="sys-item full">
+        <div class="sys-label">TFT Display</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <input type="color" id="tft-color" value="#f44336" style="width:32px;height:28px;border:none;cursor:pointer;">
+          <button class="btn primary" onclick="tftFill()">Fill</button>
+          <button class="btn" onclick="tftClear()">Clear</button>
+          <button class="btn" onclick="tftShowImage()">Show Image</button>
+        </div>
+      </div>
+      <div class="sys-item full">
+        <div class="btn-group">
+          <button class="btn" onclick="sendCmd({cmd:'scan'})">Scan I2C</button>
+          <button class="btn" onclick="sendCmd({cmd:'status'})">Firmware Status</button>
+          <button class="btn primary" onclick="runDeploy()">Deploy (git pull)</button>
+          <button class="btn" onclick="sendCmd({cmd:'led',on:true})">LED On</button>
+          <button class="btn" onclick="sendCmd({cmd:'led',on:false})">LED Off</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== LOG ===== -->
+<div class="log-panel">
+  <div class="log-box" id="log-box"></div>
+</div>
+
+<script>
+// ==================== CONFIG ====================
+const API_BASE = window.location.origin;
+const POLL_MS = 1000;
+
+// ==================== STATE ====================
+let connected = false;
+let lastTick = 0;
+let joints = {};
+
+// Joint definitions: [name, label, default_deg, group]
+const JOINT_DEFS = [
+  ['fl_hip','Hip',90,'FL'],['fl_thigh','Thigh',90,'FL'],['fl_calf','Calf',90,'FL'],
+  ['fr_hip','Hip',90,'FR'],['fr_thigh','Thigh',90,'FR'],['fr_calf','Calf',90,'FR'],
+  ['rl_hip','Hip',90,'RL'],['rl_thigh','Thigh',90,'RL'],['rl_calf','Calf',90,'RL'],
+  ['rr_hip','Hip',90,'RR'],['rr_thigh','Thigh',90,'RR'],['rr_calf','Calf',90,'RR'],
+];
+
+// ==================== INIT JOINTS ====================
+function initJoints() {
+  const grid = document.getElementById('joint-grid');
+  const groups = {};
+  JOINT_DEFS.forEach(([name, label, def, group]) => {
+    joints[name] = def;
+    if (!groups[group]) {
+      groups[group] = document.createElement('div');
+      groups[group].className = 'joint-group';
+      groups[group].innerHTML = `<div class="joint-group-title">${group}</div>`;
+      grid.appendChild(groups[group]);
+    }
+    const row = document.createElement('div');
+    row.className = 'joint-row';
+    row.innerHTML = `
+      <span class="joint-label">${label}</span>
+      <input type="range" class="joint-slider" id="j-${name}" min="0" max="180" value="${def}"
+             oninput="onJoint('${name}', this.value)">
+      <span class="joint-val" id="jv-${name}">${def}</span>`;
+    groups[group].appendChild(row);
+  });
+}
+
+function onJoint(name, val) {
+  joints[name] = parseInt(val);
+  document.getElementById('jv-' + name).textContent = val;
+  updateQuadSVG();
+  // Debounce servo command
+  clearTimeout(onJoint._t);
+  onJoint._t = setTimeout(() => sendServos(), 100);
+}
+
+function sendServos() {
+  // Build positions array: channels 0-11 = FL_hip, FL_thigh, FL_calf, FR_hip, ...
+  const positions = JOINT_DEFS.map(([name]) => joints[name]);
+  sendCmd({cmd: 'servos', positions});
+}
+
+function centerAll() {
+  JOINT_DEFS.forEach(([name]) => {
+    joints[name] = 90;
+    document.getElementById('j-' + name).value = 90;
+    document.getElementById('jv-' + name).textContent = '90';
+  });
+  updateQuadSVG();
+  sendServos();
+}
+
+function relaxAll() {
+  JOINT_DEFS.forEach(([name]) => {
+    joints[name] = 0;
+    document.getElementById('j-' + name).value = 0;
+    document.getElementById('jv-' + name).textContent = '0';
+  });
+  updateQuadSVG();
+  sendServos();
+}
+
+// ==================== QUADRUPED SVG ====================
+function updateQuadSVG() {
+  const deg2rad = d => d * Math.PI / 180;
+  // Leg geometry: shoulder length 45, calf length 40
+  const SHOULDER = 45, CALF = 40;
+
+  ['fl','fr','rl','rr'].forEach(leg => {
+    const isFront = leg.startsWith('f');
+    const isLeft = leg.endsWith('l');
+    const hip = joints[leg + '_hip'];
+    const thigh = joints[leg + '_thigh'];
+    const calf = joints[leg + '_calf'];
+
+    // Hip angle: deviation from straight (0=forward/back, 90=straight down)
+    const hipAngle = deg2rad(hip - 90);
+    // Thigh angle from body axis
+    const thighAngle = deg2rad(thigh - 90);
+    // Calf relative to thigh
+    const calfAngle = deg2rad(calf - 90);
+
+    const dir = isFront ? -1 : 1;
+    const side = isLeft ? -1 : 1;
+
+    // Hip endpoint
+    const hx = side * 20 * Math.cos(hipAngle);
+    const hy = dir * 20 * Math.sin(hipAngle);
+
+    // Thigh endpoint
+    const tx = hx + side * SHOULDER * Math.cos(thighAngle);
+    const ty = hy + dir * SHOULDER * Math.sin(thighAngle);
+
+    // Calf endpoint
+    const totalAngle = thighAngle + calfAngle;
+    const cx = tx + side * CALF * Math.cos(totalAngle);
+    const cy = ty + dir * CALF * Math.sin(totalAngle);
+
+    const thighEl = document.getElementById(leg + '-thigh');
+    const calfEl = document.getElementById(leg + '-calf');
+    if (thighEl) {
+      thighEl.setAttribute('x2', Math.round(hx));
+      thighEl.setAttribute('y2', Math.round(hy));
+    }
+    if (calfEl) {
+      calfEl.setAttribute('x1', Math.round(hx));
+      calfEl.setAttribute('y1', Math.round(hy));
+      calfEl.setAttribute('x2', Math.round(tx));
+      calfEl.setAttribute('y2', Math.round(ty));
+    }
+  });
+}
+
+// ==================== SENSORS → DOM ====================
+function updateSensors(d) {
+  // MPU
+  if (d.mpu) {
+    const [ax,ay,az,gx,gy,gz] = d.mpu;
+    const mg = v => Math.round(v / 16384 * 1000);
+    document.getElementById('s-ax').innerHTML = mg(ax) + '<span class="sensor-unit">mg</span>';
+    document.getElementById('s-ay').textContent = mg(ay);
+    document.getElementById('s-az').textContent = mg(az);
+    document.getElementById('s-gx').textContent = gx;
+    document.getElementById('s-gy').textContent = gy;
+    document.getElementById('s-gz').textContent = gz;
+    // Compute pitch/roll from accel
+    const pitch = Math.atan2(ay, Math.sqrt(ax*ax + az*az)) * 180 / Math.PI;
+    const roll = Math.atan2(-ax, Math.sqrt(ay*ay + az*az)) * 180 / Math.PI;
+    document.getElementById('q-pitch').textContent = pitch.toFixed(1);
+    document.getElementById('q-roll').textContent = roll.toFixed(1);
+  }
+  // VL53
+  if (d.vl53_mm !== null && d.vl53_mm !== undefined) {
+    document.getElementById('s-vl').innerHTML = d.vl53_mm + '<span class="sensor-unit">mm</span>';
+    document.getElementById('s-vl-status').textContent = d.vl53_mm < 200 ? 'close' : 'ok';
+    document.getElementById('s-vl-status').style.color = d.vl53_mm < 200 ? 'var(--yellow)' : 'var(--green)';
+    document.getElementById('q-height').textContent = d.vl53_mm + ' mm';
+  }
+  // INA219
+  if (d.ina) {
+    const v = d.ina.voltage_v !== undefined ? d.ina.voltage_v : d.ina.bus_v;
+    const ma = d.ina.current_ma !== undefined ? d.ina.current_ma : d.ina.current_ma_est;
+    document.getElementById('s-v').innerHTML = (v !== null && v !== undefined ? v : '—') + '<span class="sensor-unit">V</span>';
+    document.getElementById('s-ma').textContent = (ma !== null && ma !== undefined ? ma : '—');
+  }
+  // GPS
+  if (d.gps) {
+    if (d.gps.lat !== undefined && d.gps.lon !== undefined) {
+      document.getElementById('s-gps').textContent = d.gps.fix ? 'FIX' : 'NO FIX';
+      document.getElementById('s-gps').style.color = d.gps.fix ? 'var(--green)' : 'var(--yellow)';
+      document.getElementById('s-gps-coord').textContent = d.gps.lat + ', ' + d.gps.lon;
+    } else if (d.gps.raw) {
+      document.getElementById('s-gps').textContent = d.gps.raw.substring(0, 16);
+      document.getElementById('s-gps-coord').textContent = 'parsing...';
+    }
+  }
+  // I2C
+  if (d.i2c0) {
+    document.getElementById('sys-i2c0').textContent = d.i2c0.map(h => h.toUpperCase()).join(' ') || 'none';
+  }
+  if (d.i2c1) {
+    document.getElementById('sys-i2c1').textContent = d.i2c1.map(h => h.toUpperCase()).join(' ') || 'none';
+  }
+}
+
+// ==================== SEND COMMANDS ====================
+function sendCmd(payload) {
+  return fetch(API_BASE + '/api/bridge_cmd', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  }).then(r => r.json()).then(d => {
+    addLog('cmd', JSON.stringify(payload), 'ok');
+    return d;
+  }).catch(e => addLog('cmd', JSON.stringify(payload), 'err: ' + e.message));
+}
+
+function tftFill() {
+  const hex = document.getElementById('tft-color').value;
+  const rgb565 = hexToRgb565(hex);
+  sendCmd({cmd: 'fill_screen', color: rgb565});
+}
+
+function tftClear() {
+  sendCmd({cmd: 'fill_screen', color: 0x0000});
+}
+
+function tftShowImage() {
+  sendCmd({cmd: 'show_image'});
+}
+
+function hexToRgb565(hex) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+}
+
+function runDeploy() {
+  addLog('deploy', 'git pull origin main', 'running...');
+  fetch(API_BASE + '/command', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({command: 'cd /home/sipher/sipher && git pull origin main'})
+  }).then(r => r.json()).then(d => {
+    addLog('deploy', d.stdout || d.stderr || d.error || 'done', d.rc === 0 ? 'ok' : 'err');
+  }).catch(e => addLog('deploy', e.message, 'err'));
+}
+
+// ==================== POLLING ====================
+function poll() {
+  const t0 = performance.now();
+  fetch(API_BASE + '/api/sensors')
+    .then(r => r.json())
+    .then(d => {
+      connected = true;
+      const latency = Math.round(performance.now() - t0);
+      document.getElementById('latency').textContent = latency;
+      updateSensors(d);
+      // Check for dashboard tick (has cmd=dashboard_tick)
+      if (d.cmd === 'dashboard_tick') {
+        lastTick = Date.now();
+      }
+    })
+    .catch(() => { connected = false; });
+  // Update connection indicator
+  const dot = document.getElementById('conn-dot');
+  const txt = document.getElementById('conn-text');
+  if (connected) {
+    dot.className = 'dot on';
+    txt.textContent = 'connected';
+  } else {
+    dot.className = 'dot off';
+    txt.textContent = 'disconnected';
+  }
+}
+
+function pollInfo() {
+  fetch(API_BASE + '/api/info').then(r => r.json()).then(d => {
+    document.getElementById('pi-ip').textContent = d.pi_ip || location.hostname;
+    document.getElementById('uptime').textContent = d.uptime ? Math.round(d.uptime) + 's' : '—';
+  }).catch(() => {});
+}
+
+// ==================== LOG ====================
+function addLog(src, msg, status) {
+  const box = document.getElementById('log-box');
+  const ts = new Date().toLocaleTimeString('en-GB', {hour12:false});
+  const cls = status === 'ok' ? 'ok' : status === 'err' ? 'err' : status === 'warn' ? 'warn' : '';
+  box.innerHTML += `<div><span class="ts">${ts}</span> <span class="${cls}">[${src}]</span> ${msg}</div>`;
+  box.scrollTop = box.scrollHeight;
+  // Keep last 50 lines
+  while (box.children.length > 50) box.removeChild(box.firstChild);
+}
+
+// ==================== BOOT ====================
+initJoints();
+updateQuadSVG();
+pollInfo();
+setInterval(poll, POLL_MS);
+poll();
+setInterval(pollInfo, 10000);
+addLog('boot', 'Sipher Mission Control ready', 'ok');
+</script>
+</body>
+</html>
