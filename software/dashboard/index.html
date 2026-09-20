@@ -5,556 +5,315 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sipher Mission Control</title>
 <style>
-  :root {
-    --bg: #0a0a0a; --card: #141414; --border: #2a2a2a;
-    --text: #e0e0e0; --dim: #666; --accent: #4fc3f7;
-    --green: #4caf50; --yellow: #ff9800; --red: #f44336;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; background: var(--bg); color: var(--text); font-size: 13px; overflow-x: hidden; }
-
-  /* --- Top Bar --- */
-  .topbar {
-    display: flex; align-items: center; gap: 16px;
-    padding: 10px 20px; background: #111; border-bottom: 1px solid var(--border);
-    position: sticky; top: 0; z-index: 100;
-  }
-  .topbar .logo { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: 1px; }
-  .topbar .logo span { color: var(--dim); font-weight: 400; }
-  .topbar .status-pill {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 3px 10px; border-radius: 12px; font-size: 11px;
-    background: #1a1a1a; border: 1px solid var(--border);
-  }
-  .topbar .dot { width: 7px; height: 7px; border-radius: 50%; }
-  .topbar .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
-  .topbar .dot.off { background: var(--red); }
-  .topbar .spacer { flex: 1; }
-  .topbar .metric { color: var(--dim); font-size: 11px; }
-  .topbar .metric b { color: var(--text); }
-
-  /* --- Main Grid --- */
-  .main { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; gap: 12px; padding: 12px 20px; }
-  @media (max-width: 900px) { .main { grid-template-columns: 1fr; } }
-
-  /* --- Cards --- */
-  .card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
-    padding: 14px; position: relative;
-  }
-  .card-header {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
-  }
-  .card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); }
-  .card-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: #1a1a1a; border: 1px solid var(--border); color: var(--dim); }
-
-  /* --- Quadruped SVG --- */
-  .quad-panel { grid-column: 1; grid-row: 1; min-height: 340px; display: flex; flex-direction: column; }
-  .quad-panel svg { flex: 1; width: 100%; }
-  .quad-stats { display: flex; gap: 16px; margin-top: 10px; }
-  .quad-stat { font-size: 11px; color: var(--dim); }
-  .quad-stat b { color: var(--text); font-size: 13px; display: block; margin-top: 2px; }
-
-  /* --- Sensor Panel --- */
-  .sensor-panel { grid-column: 2; grid-row: 1; }
-  .sensor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .sensor-item { background: #1a1a1a; border-radius: 6px; padding: 10px; }
-  .sensor-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); margin-bottom: 4px; }
-  .sensor-value { font-size: 18px; font-weight: 600; color: var(--text); }
-  .sensor-unit { font-size: 11px; color: var(--dim); margin-left: 3px; }
-  .sensor-sub { font-size: 11px; color: #555; margin-top: 3px; }
-
-  /* --- Joint Controls --- */
-  .joint-panel { grid-column: 1; grid-row: 2; }
-  .joint-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-  .joint-group { background: #1a1a1a; border-radius: 6px; padding: 10px; }
-  .joint-group-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); margin-bottom: 8px; text-align: center; }
-  .joint-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
-  .joint-row:last-child { margin-bottom: 0; }
-  .joint-label { font-size: 10px; color: var(--dim); min-width: 36px; text-align: right; }
-  .joint-slider { flex: 1; height: 4px; -webkit-appearance: none; appearance: none; background: #333; border-radius: 2px; outline: none; }
-  .joint-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); cursor: pointer; }
-  .joint-val { font-size: 11px; color: var(--text); min-width: 28px; text-align: center; font-variant-numeric: tabular-nums; }
-
-  /* --- System Panel --- */
-  .sys-panel { grid-column: 2; grid-row: 2; }
-  .sys-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .sys-item { background: #1a1a1a; border-radius: 6px; padding: 10px; }
-  .sys-item.full { grid-column: 1 / -1; }
-  .sys-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); margin-bottom: 4px; }
-  .sys-value { font-size: 13px; color: var(--text); word-break: break-all; }
-
-  /* --- Buttons --- */
-  .btn {
-    background: #1a1a1a; color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 7px 14px; font-size: 11px; cursor: pointer;
-    font-family: inherit; transition: background 0.15s;
-  }
-  .btn:hover { background: #252525; }
-  .btn.primary { background: #1565c0; border-color: #1565c0; }
-  .btn.primary:hover { background: #1976d2; }
-  .btn.danger { background: #b71c1c; border-color: #b71c1c; }
-  .btn.danger:hover { background: #c62828; }
-  .btn-group { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-
-  /* --- Terminal Log --- */
-  .log-panel { padding: 0 20px 12px; }
-  .log-box {
-    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
-    padding: 10px 14px; max-height: 120px; overflow-y: auto; font-size: 11px;
-    color: #888; line-height: 1.5;
-  }
-  .log-box .ts { color: #555; }
-  .log-box .ok { color: var(--green); }
-  .log-box .warn { color: var(--yellow); }
-  .log-box .err { color: var(--red); }
-
-  /* --- Scrollbar --- */
-  ::-webkit-scrollbar { width: 5px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+:root {
+  --bg0:#09090b;--bg1:#111113;--bg2:#18181b;--bg3:#1f1f23;
+  --bd:#27272a;--bdh:#3f3f46;
+  --tx:#fafafa;--t2:#a1a1aa;--t3:#71717a;--t4:#52525b;
+  --ac:#38bdf8;--acd:#0c4a6e;
+  --gn:#22c55e;--gnd:#14532d;
+  --yl:#eab308;--yld:#422006;
+  --rd:#ef4444;--rdd:#450a0a;
+  --pu:#a78bfa;--pud:#2e1065;
+  --or:#fb923c;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg0);color:var(--tx);display:flex;flex-direction:column;overflow:hidden}
+.topbar{height:40px;display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--bg1);border-bottom:1px solid var(--bd);flex-shrink:0;z-index:100;font-size:12px;user-select:none}
+.logo{font-weight:700;font-size:13px;letter-spacing:.5px}
+.logo em{font-style:normal;color:var(--ac)}
+.sep{width:1px;height:16px;background:var(--bd)}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;background:var(--bg2);border:1px solid var(--bd);font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--t2)}
+.dot{width:6px;height:6px;border-radius:50%}
+.dot.on{background:var(--gn);box-shadow:0 0 8px var(--gn)}
+.dot.off{background:var(--rd)}
+.spacer{flex:1}
+.m{color:var(--t3);font-size:11px}.m b{color:var(--t2);font-weight:500}
+.layout{display:flex;flex:1;overflow:hidden}
+.sidebar{width:220px;flex-shrink:0;background:var(--bg1);border-right:1px solid var(--bd);display:flex;flex-direction:column;overflow-y:auto}
+.sidebar-section{padding:12px 12px 4px}
+.sidebar-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--t4);margin-bottom:6px}
+.tree-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;font-size:12px;color:var(--t2);cursor:pointer;transition:all .1s}
+.tree-item:hover{background:var(--bg3);color:var(--tx)}
+.tree-item.active{background:var(--acd);color:var(--ac)}
+.tree-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+.tree-dot.green{background:var(--gn)}.tree-dot.red{background:var(--rd)}.tree-dot.blue{background:var(--ac)}.tree-dot.purple{background:var(--pu)}.tree-dot.off{background:var(--t4)}
+.tree-icon{width:16px;text-align:center;color:var(--t4);font-size:10px}
+.tree-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tree-badge{font-size:9px;padding:1px 5px;border-radius:6px;background:var(--bg3);color:var(--t4)}
+.tree-badge.ok{background:var(--gnd);color:var(--gn)}
+.sidebar-footer{margin-top:auto;padding:10px 12px;border-top:1px solid var(--bd);font-size:10px;color:var(--t4)}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.viz-area{flex:1;display:flex;gap:0;overflow:hidden}
+.viz-left{flex:1;display:flex;flex-direction:column;padding:12px;gap:12px;overflow-y:auto}
+.viz-right{width:300px;flex-shrink:0;border-left:1px solid var(--bd);display:flex;flex-direction:column;overflow-y:auto;padding:12px;gap:12px}
+.card{background:var(--bg1);border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+.card-head{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--bd)}
+.card-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--t3)}
+.card-tag{font-size:10px;padding:2px 7px;border-radius:8px;background:var(--bg3);color:var(--t4);font-family:'JetBrains Mono',monospace}
+.card-body{padding:14px}
+.quad-card{flex:1;min-height:300px;display:flex;flex-direction:column}
+.quad-card .card-body{flex:1;display:flex;flex-direction:column;padding:0}
+.quad-canvas{flex:1;width:100%;background:radial-gradient(ellipse at center,var(--bg2) 0%,var(--bg0) 100%)}
+.quad-canvas svg{width:100%;height:100%}
+.quad-stats{display:flex;gap:20px;padding:10px 14px;border-top:1px solid var(--bd)}
+.qstat{text-align:center;min-width:50px}
+.qstat-label{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--t4)}
+.qstat-value{font-size:15px;font-weight:600;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
+.qstat-unit{font-size:10px;color:var(--t4);margin-left:2px}
+.joints-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.leg-group{background:var(--bg2);border-radius:6px;padding:10px}
+.leg-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;text-align:center}
+.leg-title.fl{color:var(--ac)}.leg-title.fr{color:var(--pu)}.leg-title.rl{color:var(--gn)}.leg-title.rr{color:var(--or)}
+.jrow{display:flex;align-items:center;gap:6px;margin-bottom:5px}.jrow:last-child{margin-bottom:0}
+.jlbl{font-size:10px;color:var(--t4);min-width:32px;text-align:right;font-family:'JetBrains Mono',monospace}
+.jslider{flex:1;height:3px;-webkit-appearance:none;appearance:none;background:var(--bg3);border-radius:2px;outline:none}
+.jslider::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:var(--ac);cursor:pointer;border:2px solid var(--bg0)}
+.jval{font-size:10px;color:var(--t2);min-width:24px;text-align:center;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
+.sensor-row{display:flex;align-items:baseline;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bd)}
+.sensor-row:last-child{border-bottom:none}
+.sr-name{font-size:11px;font-weight:500;color:var(--t2)}
+.sr-sub{font-size:10px;color:var(--t4);margin-top:1px;font-family:'JetBrains Mono',monospace}
+.sr-val{font-size:15px;font-weight:600;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
+.sr-unit{font-size:10px;color:var(--t4);margin-left:2px}
+.sr-status{font-size:9px;margin-top:1px}
+.sr-status.ok{color:var(--gn)}.sr-status.warn{color:var(--yl)}.sr-status.off{color:var(--t4)}
+.sys-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--bd)}
+.sys-row:last-child{border-bottom:none}
+.sys-label{font-size:11px;color:var(--t3)}
+.sys-val{font-size:11px;color:var(--t2);font-family:'JetBrains Mono',monospace}
+.btn{background:var(--bg3);color:var(--t2);border:1px solid var(--bd);border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer;font-family:inherit;transition:all .12s;white-space:nowrap}
+.btn:hover{background:var(--bd);color:var(--tx);border-color:var(--bdh)}
+.btn.accent{background:var(--acd);color:var(--ac);border-color:var(--acd)}.btn.accent:hover{background:#0e5a8a}
+.btn.green{background:var(--gnd);color:var(--gn);border-color:var(--gnd)}.btn.green:hover{background:#166534}
+.btn.red{background:var(--rdd);color:var(--rd);border-color:var(--rdd)}.btn.red:hover{background:#7f1d1d}
+.btn.sm{padding:3px 8px;font-size:10px}
+.btn-group{display:flex;gap:4px;flex-wrap:wrap}
+.bottom-panel{height:140px;flex-shrink:0;border-top:1px solid var(--bd);display:flex;flex-direction:column}
+.bottom-tabs{display:flex;gap:0;padding:0 12px;background:var(--bg1);border-bottom:1px solid var(--bd)}
+.btab{padding:6px 14px;font-size:11px;color:var(--t4);cursor:pointer;border-bottom:2px solid transparent;transition:all .12s}
+.btab:hover{color:var(--t2)}.btab.active{color:var(--ac);border-bottom-color:var(--ac)}
+.log-content{flex:1;overflow-y:auto;padding:8px 14px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--t3);line-height:1.6}
+.log-content .ts{color:var(--t4)}.log-content .ok{color:var(--gn)}.log-content .err{color:var(--rd)}.log-content .cmd{color:var(--ac)}
+.cmd-input-row{display:flex;gap:6px;padding:6px 12px;border-top:1px solid var(--bd);background:var(--bg1)}
+.cmd-input{flex:1;background:var(--bg2);border:1px solid var(--bd);border-radius:4px;padding:4px 8px;color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:11px;outline:none}
+.cmd-input:focus{border-color:var(--ac)}.cmd-input::placeholder{color:var(--t4)}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:2px}
+@media(max-width:900px){.sidebar{display:none}.viz-right{width:100%;border-left:none;border-top:1px solid var(--bd)}.viz-area{flex-direction:column}.joints-grid{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
-
-<!-- ===== TOP BAR ===== -->
 <div class="topbar">
-  <div class="logo">SIPHER<span>MC</span></div>
-  <div class="status-pill">
-    <div class="dot" id="conn-dot"></div>
-    <span id="conn-text">connecting</span>
-  </div>
-  <div class="metric">ping <b id="latency">—</b>ms</div>
+  <div class="logo">SIPHER<em>MC</em></div><div class="sep"></div>
+  <div class="pill"><div class="dot" id="conn-dot"></div><span id="conn-text">connecting</span></div>
+  <div class="pill">ping <b id="latency">--</b>ms</div>
   <div class="spacer"></div>
-  <div class="metric">uptime <b id="uptime">—</b></div>
-  <div class="metric">fw <b id="fw-ver">—</b></div>
-  <div class="metric">pi <b id="pi-ip">—</b></div>
+  <div class="m">batt <b id="batt-v">--</b></div><div class="sep"></div>
+  <div class="m">uptime <b id="uptime">--</b></div>
+  <div class="m">pi <b id="pi-ip">--</b></div>
 </div>
-
-<!-- ===== MAIN GRID ===== -->
-<div class="main">
-
-  <!-- Quadruped Visualization -->
-  <div class="card quad-panel">
-    <div class="card-header">
-      <span class="card-title">Quadruped</span>
-      <span class="card-badge" id="quad-mode">top view</span>
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-section"><div class="sidebar-title">Explorer</div></div>
+    <div class="tree-item active"><span class="tree-icon">&gt;</span><span class="tree-label">Sipher</span></div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">Hardware</div>
+      <div class="tree-item"><span class="tree-dot green"></span><span class="tree-label">Pico 2 W</span><span class="tree-badge ok" id="sb-pico">on</span></div>
+      <div class="tree-item"><span class="tree-dot green"></span><span class="tree-label">MPU6050</span><span class="tree-badge" id="sb-mpu">0x68</span></div>
+      <div class="tree-item"><span class="tree-dot green"></span><span class="tree-label">PCA9685</span><span class="tree-badge" id="sb-pca">0x40</span></div>
+      <div class="tree-item"><span class="tree-dot green"></span><span class="tree-label">INA219</span><span class="tree-badge" id="sb-ina">0x41</span></div>
+      <div class="tree-item"><span class="tree-dot green"></span><span class="tree-label">VL53L0X</span><span class="tree-badge" id="sb-vl">0x29</span></div>
+      <div class="tree-item"><span class="tree-dot off"></span><span class="tree-label">GPS NEO-6M</span><span class="tree-badge" id="sb-gps">UART</span></div>
     </div>
-    <svg id="quad-svg" viewBox="0 0 420 260" xmlns="http://www.w3.org/2000/svg">
-      <!-- Body -->
-      <rect x="130" y="80" width="160" height="100" rx="12" fill="#1a1a1a" stroke="#333" stroke-width="1.5"/>
-      <text x="210" y="135" text-anchor="middle" fill="#555" font-size="11" font-family="monospace">SIPHER</text>
-      <!-- Leg groups: FL FR RL RR -->
-      <g id="leg-fl" transform="translate(140,90)">
-        <line x1="0" y1="0" x2="-40" y2="-45" stroke="#4fc3f7" stroke-width="3" stroke-linecap="round" id="fl-thigh"/>
-        <line x1="-40" y1="-45" x2="-65" y2="-80" stroke="#4fc3f7" stroke-width="2.5" stroke-linecap="round" id="fl-calf"/>
-        <circle cx="-65" cy="-80" r="3" fill="#4fc3f7"/>
-        <text x="-55" y="-85" fill="#4fc3f7" font-size="9" font-family="monospace">FL</text>
-      </g>
-      <g id="leg-fr" transform="translate(280,90)">
-        <line x1="0" y1="0" x2="40" y2="-45" stroke="#4fc3f7" stroke-width="3" stroke-linecap="round" id="fr-thigh"/>
-        <line x1="40" y1="-45" x2="65" y2="-80" stroke="#4fc3f7" stroke-width="2.5" stroke-linecap="round" id="fr-calf"/>
-        <circle cx="65" cy="-80" r="3" fill="#4fc3f7"/>
-        <text x="55" y="-85" fill="#4fc3f7" font-size="9" font-family="monospace">FR</text>
-      </g>
-      <g id="leg-rl" transform="translate(140,170)">
-        <line x1="0" y1="0" x2="-40" y2="45" stroke="#81c784" stroke-width="3" stroke-linecap="round" id="rl-thigh"/>
-        <line x1="-40" y1="45" x2="-65" y2="80" stroke="#81c784" stroke-width="2.5" stroke-linecap="round" id="rl-calf"/>
-        <circle cx="-65" cy="80" r="3" fill="#81c784"/>
-        <text x="-55" y="92" fill="#81c784" font-size="9" font-family="monospace">RL</text>
-      </g>
-      <g id="leg-rr" transform="translate(280,170)">
-        <line x1="0" y1="0" x2="40" y2="45" stroke="#81c784" stroke-width="3" stroke-linecap="round" id="rr-thigh"/>
-        <line x1="40" y1="45" x2="65" y2="80" stroke="#81c784" stroke-width="2.5" stroke-linecap="round" id="rr-calf"/>
-        <circle cx="65" cy="80" r="3" fill="#81c784"/>
-        <text x="55" y="92" fill="#81c784" font-size="9" font-family="monospace">RR</text>
-      </g>
-      <!-- Ground contact indicators -->
-      <g id="contacts" opacity="0.4">
-        <circle cx="75" cy="10" r="4" fill="#4caf50" id="c-fl"/>
-        <circle cx="345" cy="10" r="4" fill="#4caf50" id="c-fr"/>
-        <circle cx="75" cy="250" r="4" fill="#4caf50" id="c-rl"/>
-        <circle cx="345" cy="250" r="4" fill="#4caf50" id="c-rr"/>
-      </g>
-    </svg>
-    <div class="quad-stats">
-      <div class="quad-stat">pitch<b id="q-pitch">0.0</b></div>
-      <div class="quad-stat">roll<b id="q-roll">0.0</b></div>
-      <div class="quad-stat">yaw<b id="q-yaw">0.0</b></div>
-      <div class="quad-stat">height<b id="q-height">—</b></div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">Peripherals</div>
+      <div class="tree-item"><span class="tree-dot blue"></span><span class="tree-label">ILI9341 TFT</span><span class="tree-badge">SPI0</span></div>
+      <div class="tree-item"><span class="tree-dot off"></span><span class="tree-label">nRF24L01+</span><span class="tree-badge" id="sb-nrf">off</span></div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">I2C Bus</div>
+      <div class="tree-item"><span class="tree-dot purple"></span><span class="tree-label">I2C0 (GP8/9)</span><span class="tree-badge" id="sb-i2c0">--</span></div>
+      <div class="tree-item"><span class="tree-dot purple"></span><span class="tree-label">I2C1 (GP2/3)</span><span class="tree-badge" id="sb-i2c1">--</span></div>
+    </div>
+    <div class="sidebar-footer">
+      <div>fw <b id="sb-fw">--</b></div>
+      <div style="margin-top:3px">mem <b id="sb-mem">--</b></div>
     </div>
   </div>
-
-  <!-- Sensors -->
-  <div class="card sensor-panel">
-    <div class="card-header">
-      <span class="card-title">Sensors</span>
-      <span class="card-badge" id="sensor-rate">1 Hz</span>
-    </div>
-    <div class="sensor-grid">
-      <div class="sensor-item">
-        <div class="sensor-label">IMU (MPU6050)</div>
-        <div class="sensor-value" id="s-ax">—<span class="sensor-unit">mg</span></div>
-        <div class="sensor-sub">ax <span id="s-ay">—</span> ay <span id="s-az">—</span> az</div>
-        <div class="sensor-sub">gx <span id="s-gx">—</span> gy <span id="s-gy">—</span> gz <span id="s-gz">—</span></div>
-      </div>
-      <div class="sensor-item">
-        <div class="sensor-label">ToF (VL53L0X)</div>
-        <div class="sensor-value" id="s-vl">—<span class="sensor-unit">mm</span></div>
-        <div class="sensor-sub" id="s-vl-status">waiting</div>
-      </div>
-      <div class="sensor-item">
-        <div class="sensor-label">Power (INA219)</div>
-        <div class="sensor-value" id="s-v">—<span class="sensor-unit">V</span></div>
-        <div class="sensor-sub">current <span id="s-ma">—</span> mA</div>
-      </div>
-      <div class="sensor-item">
-        <div class="sensor-label">GPS (NEO-6M)</div>
-        <div class="sensor-value" id="s-gps">—</div>
-        <div class="sensor-sub" id="s-gps-coord">no fix</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Joint Controls -->
-  <div class="card joint-panel">
-    <div class="card-header">
-      <span class="card-title">Joint Control</span>
-      <div>
-        <button class="btn" onclick="centerAll()">Center All</button>
-        <button class="btn danger" onclick="relaxAll()">Relax</button>
-      </div>
-    </div>
-    <div class="joint-grid" id="joint-grid"></div>
-  </div>
-
-  <!-- System -->
-  <div class="card sys-panel">
-    <div class="card-header">
-      <span class="card-title">System</span>
-    </div>
-    <div class="sys-grid">
-      <div class="sys-item">
-        <div class="sys-label">I2C0 (PCA/INA/VL)</div>
-        <div class="sys-value" id="sys-i2c0">—</div>
-      </div>
-      <div class="sys-item">
-        <div class="sys-label">I2C1 (MPU)</div>
-        <div class="sys-value" id="sys-i2c1">—</div>
-      </div>
-      <div class="sys-item">
-        <div class="sys-label">Pico Firmware</div>
-        <div class="sys-value" id="sys-fw">—</div>
-      </div>
-      <div class="sys-item">
-        <div class="sys-label">Free Memory</div>
-        <div class="sys-value" id="sys-mem">—</div>
-      </div>
-      <div class="sys-item full">
-        <div class="sys-label">TFT Display</div>
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-          <input type="color" id="tft-color" value="#f44336" style="width:32px;height:28px;border:none;cursor:pointer;">
-          <button class="btn primary" onclick="tftFill()">Fill</button>
-          <button class="btn" onclick="tftClear()">Clear</button>
-          <button class="btn" onclick="tftShowImage()">Show Image</button>
+  <div class="main">
+    <div class="viz-area">
+      <div class="viz-left">
+        <div class="card quad-card">
+          <div class="card-head"><span class="card-title">Digital Twin</span><span class="card-tag">perspective</span></div>
+          <div class="card-body">
+            <div class="quad-canvas">
+              <svg id="quad-svg" viewBox="0 0 500 280" xmlns="http://www.w3.org/2000/svg">
+                <defs><pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse"><path d="M 30 0 L 0 0 0 30" fill="none" stroke="#1a1a1f" stroke-width="0.5"/></pattern></defs>
+                <rect width="500" height="280" fill="url(#grid)" opacity="0.5"/>
+                <ellipse cx="250" cy="230" rx="160" ry="18" fill="#111118" stroke="#222" stroke-width="0.5" stroke-dasharray="3,3"/>
+                <ellipse cx="252" cy="155" rx="80" ry="30" fill="#000" opacity="0.3"/>
+                <rect x="175" y="115" width="150" height="70" rx="14" fill="var(--bg2)" stroke="var(--bdh)" stroke-width="1.5"/>
+                <rect x="185" y="122" width="130" height="2" rx="1" fill="var(--ac)" opacity="0.25"/>
+                <text x="250" y="157" text-anchor="middle" fill="var(--t4)" font-size="11" font-family="JetBrains Mono,monospace" font-weight="500">SIPHER</text>
+                <rect x="235" y="107" width="30" height="10" rx="3" fill="var(--bg3)" stroke="var(--bd)" stroke-width="0.8"/>
+                <circle cx="245" cy="112" r="2" fill="var(--gn)" opacity="0.8"/><circle cx="255" cy="112" r="2" fill="var(--gn)" opacity="0.8"/>
+                <g id="leg-fl"><line id="fl-s" x1="190" y1="130" x2="148" y2="85" stroke="var(--ac)" stroke-width="3.5" stroke-linecap="round"/><line id="fl-k" x1="148" y1="85" x2="118" y2="42" stroke="var(--ac)" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/><line id="fl-f" x1="118" y1="42" x2="108" y2="25" stroke="var(--ac)" stroke-width="2" stroke-linecap="round" opacity="0.6"/><circle cx="108" cy="25" r="4" fill="var(--ac)" opacity="0.9"/><text x="95" y="20" fill="var(--ac)" font-size="9" font-family="JetBrains Mono" font-weight="600">FL</text></g>
+                <g id="leg-fr"><line id="fr-s" x1="310" y1="130" x2="352" y2="85" stroke="var(--pu)" stroke-width="3.5" stroke-linecap="round"/><line id="fr-k" x1="352" y1="85" x2="382" y2="42" stroke="var(--pu)" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/><line id="fr-f" x1="382" y1="42" x2="392" y2="25" stroke="var(--pu)" stroke-width="2" stroke-linecap="round" opacity="0.6"/><circle cx="392" cy="25" r="4" fill="var(--pu)" opacity="0.9"/><text x="398" y="20" fill="var(--pu)" font-size="9" font-family="JetBrains Mono" font-weight="600">FR</text></g>
+                <g id="leg-rl"><line id="rl-s" x1="190" y1="170" x2="148" y2="215" stroke="var(--gn)" stroke-width="3.5" stroke-linecap="round"/><line id="rl-k" x1="148" y1="215" x2="118" y2="255" stroke="var(--gn)" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/><line id="rl-f" x1="118" y1="255" x2="108" y2="270" stroke="var(--gn)" stroke-width="2" stroke-linecap="round" opacity="0.6"/><circle cx="108" cy="270" r="4" fill="var(--gn)" opacity="0.9"/><text x="95" y="276" fill="var(--gn)" font-size="9" font-family="JetBrains Mono" font-weight="600">RL</text></g>
+                <g id="leg-rr"><line id="rr-s" x1="310" y1="170" x2="352" y2="215" stroke="var(--or)" stroke-width="3.5" stroke-linecap="round"/><line id="rr-k" x1="352" y1="215" x2="382" y2="255" stroke="var(--or)" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/><line id="rr-f" x1="382" y1="255" x2="392" y2="270" stroke="var(--or)" stroke-width="2" stroke-linecap="round" opacity="0.6"/><circle cx="392" cy="270" r="4" fill="var(--or)" opacity="0.9"/><text x="398" y="276" fill="var(--or)" font-size="9" font-family="JetBrains Mono" font-weight="600">RR</text></g>
+                <g opacity="0.6"><circle cx="190" cy="130" r="3" fill="var(--bg0)" stroke="var(--ac)" stroke-width="1"/><circle cx="310" cy="130" r="3" fill="var(--bg0)" stroke="var(--pu)" stroke-width="1"/><circle cx="190" cy="170" r="3" fill="var(--bg0)" stroke="var(--gn)" stroke-width="1"/><circle cx="310" cy="170" r="3" fill="var(--bg0)" stroke="var(--or)" stroke-width="1"/></g>
+              </svg>
+            </div>
+            <div class="quad-stats">
+              <div class="qstat"><div class="qstat-label">Pitch</div><div class="qstat-value" id="q-pitch">0.0<span class="qstat-unit">deg</span></div></div>
+              <div class="qstat"><div class="qstat-label">Roll</div><div class="qstat-value" id="q-roll">0.0<span class="qstat-unit">deg</span></div></div>
+              <div class="qstat"><div class="qstat-label">Height</div><div class="qstat-value" id="q-height">--<span class="qstat-unit">mm</span></div></div>
+              <div class="qstat"><div class="qstat-label">Voltage</div><div class="qstat-value" id="q-voltage">--<span class="qstat-unit">V</span></div></div>
+              <div class="qstat"><div class="qstat-label">Current</div><div class="qstat-value" id="q-current">--<span class="qstat-unit">mA</span></div></div>
+              <div class="qstat"><div class="qstat-label">GPS</div><div class="qstat-value" id="q-gps">--<span class="qstat-unit"></span></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-head">
+            <span class="card-title">Joint Control</span>
+            <div class="btn-group"><button class="btn accent sm" onclick="centerAll()">Center All</button><button class="btn red sm" onclick="relaxAll()">Relax</button></div>
+          </div>
+          <div class="card-body"><div class="joints-grid" id="joints-grid"></div></div>
         </div>
       </div>
-      <div class="sys-item full">
-        <div class="btn-group">
-          <button class="btn" onclick="sendCmd({cmd:'scan'})">Scan I2C</button>
-          <button class="btn" onclick="sendCmd({cmd:'status'})">Firmware Status</button>
-          <button class="btn primary" onclick="runDeploy()">Deploy (git pull)</button>
-          <button class="btn" onclick="sendCmd({cmd:'led',on:true})">LED On</button>
-          <button class="btn" onclick="sendCmd({cmd:'led',on:false})">LED Off</button>
+      <div class="viz-right">
+        <div class="card">
+          <div class="card-head"><span class="card-title">Sensors</span><span class="card-tag">1 Hz</span></div>
+          <div class="card-body" style="padding:4px 14px">
+            <div class="sensor-row"><div><div class="sr-name">MPU6050</div><div class="sr-sub">IMU 6-axis</div></div><div style="text-align:right"><div class="sr-val" id="s-ax">--</div><div class="sr-sub" id="s-mpu-detail">ax ay az</div></div></div>
+            <div class="sensor-row"><div><div class="sr-name">VL53L0X</div><div class="sr-sub">Laser ToF</div></div><div style="text-align:right"><div class="sr-val" id="s-vl">--<span class="sr-unit">mm</span></div><div class="sr-status off" id="s-vl-status">waiting</div></div></div>
+            <div class="sensor-row"><div><div class="sr-name">INA219</div><div class="sr-sub">Power</div></div><div style="text-align:right"><div class="sr-val" id="s-v">--<span class="sr-unit">V</span></div><div class="sr-sub"><span id="s-ma">--</span> mA</div></div></div>
+            <div class="sensor-row"><div><div class="sr-name">NEO-6M</div><div class="sr-sub">GPS</div></div><div style="text-align:right"><div class="sr-val" id="s-gps">--</div><div class="sr-status off" id="s-gps-status">no fix</div></div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">System</span></div>
+          <div class="card-body" style="padding:4px 14px">
+            <div class="sys-row"><span class="sys-label">Firmware</span><span class="sys-val" id="sys-fw">--</span></div>
+            <div class="sys-row"><span class="sys-label">Uptime</span><span class="sys-val" id="sys-uptime">--</span></div>
+            <div class="sys-row"><span class="sys-label">I2C0</span><span class="sys-val" id="sys-i2c0">--</span></div>
+            <div class="sys-row"><span class="sys-label">I2C1</span><span class="sys-val" id="sys-i2c1">--</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">TFT Display</span><span class="card-tag">240x320</span></div>
+          <div class="card-body">
+            <div style="display:flex;gap:6px;align-items:center">
+              <input type="color" id="tft-color" value="#38bdf8" style="width:28px;height:24px;border:1px solid var(--bd);border-radius:3px;cursor:pointer;background:none">
+              <button class="btn accent sm" onclick="tftFill()">Fill</button>
+              <button class="btn sm" onclick="tftClear()">Clear</button>
+              <button class="btn sm" onclick="tftShowImage()">Image</button>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Actions</span></div>
+          <div class="card-body">
+            <div class="btn-group" style="flex-direction:column;gap:6px">
+              <div style="display:flex;gap:4px"><button class="btn sm" onclick="sendCmd({cmd:'scan'})">Scan</button><button class="btn sm" onclick="sendCmd({cmd:'status'})">Status</button><button class="btn green sm" onclick="runDeploy()">Deploy</button></div>
+              <div style="display:flex;gap:4px"><button class="btn sm" onclick="sendCmd({cmd:'led',on:true})">LED+</button><button class="btn sm" onclick="sendCmd({cmd:'led',on:false})">LED-</button></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
+    <div class="bottom-panel">
+      <div class="bottom-tabs"><div class="btab active">Log</div></div>
+      <div class="log-content" id="log-box"></div>
+      <div class="cmd-input-row">
+        <span style="color:var(--t4);font-family:'JetBrains Mono',monospace;font-size:11px;line-height:24px">$</span>
+        <input class="cmd-input" id="cmd-input" placeholder='{"cmd":"sensors"}' onkeydown="if(event.key==='Enter')sendRawCmd()">
+        <button class="btn accent sm" onclick="sendRawCmd()">Send</button>
+      </div>
+    </div>
   </div>
 </div>
-
-<!-- ===== LOG ===== -->
-<div class="log-panel">
-  <div class="log-box" id="log-box"></div>
-</div>
-
 <script>
-// ==================== CONFIG ====================
-const API_BASE = window.location.origin;
-const POLL_MS = 1000;
-
-// ==================== STATE ====================
-let connected = false;
-let lastTick = 0;
-let joints = {};
-
-// Joint definitions: [name, label, default_deg, group]
-const JOINT_DEFS = [
+const API=window.location.origin;
+let connected=false,joints={};
+const JOINTS=[
   ['fl_hip','Hip',90,'FL'],['fl_thigh','Thigh',90,'FL'],['fl_calf','Calf',90,'FL'],
   ['fr_hip','Hip',90,'FR'],['fr_thigh','Thigh',90,'FR'],['fr_calf','Calf',90,'FR'],
   ['rl_hip','Hip',90,'RL'],['rl_thigh','Thigh',90,'RL'],['rl_calf','Calf',90,'RL'],
   ['rr_hip','Hip',90,'RR'],['rr_thigh','Thigh',90,'RR'],['rr_calf','Calf',90,'RR'],
 ];
-
-// ==================== INIT JOINTS ====================
-function initJoints() {
-  const grid = document.getElementById('joint-grid');
-  const groups = {};
-  JOINT_DEFS.forEach(([name, label, def, group]) => {
-    joints[name] = def;
-    if (!groups[group]) {
-      groups[group] = document.createElement('div');
-      groups[group].className = 'joint-group';
-      groups[group].innerHTML = `<div class="joint-group-title">${group}</div>`;
-      grid.appendChild(groups[group]);
-    }
-    const row = document.createElement('div');
-    row.className = 'joint-row';
-    row.innerHTML = `
-      <span class="joint-label">${label}</span>
-      <input type="range" class="joint-slider" id="j-${name}" min="0" max="180" value="${def}"
-             oninput="onJoint('${name}', this.value)">
-      <span class="joint-val" id="jv-${name}">${def}</span>`;
-    groups[group].appendChild(row);
+function initJoints(){
+  const g=document.getElementById('joints-grid'),gr={};
+  JOINTS.forEach(([n,l,d,c])=>{
+    joints[n]=d;
+    if(!gr[c]){gr[c]=document.createElement('div');gr[c].className='leg-group';gr[c].innerHTML='<div class="leg-title '+c.toLowerCase()+'">'+c+'</div>';g.appendChild(gr[c])}
+    const r=document.createElement('div');r.className='jrow';
+    r.innerHTML='<span class="jlbl">'+l+'</span><input type="range" class="jslider" id="j-'+n+'" min="0" max="180" value="'+d+'" oninput="onJ(\''+n+'\',this.value)"><span class="jval" id="jv-'+n+'">'+d+'</span>';
+    gr[c].appendChild(r);
   });
 }
-
-function onJoint(name, val) {
-  joints[name] = parseInt(val);
-  document.getElementById('jv-' + name).textContent = val;
-  updateQuadSVG();
-  // Debounce servo command
-  clearTimeout(onJoint._t);
-  onJoint._t = setTimeout(() => sendServos(), 100);
-}
-
-function sendServos() {
-  // Build positions array: channels 0-11 = FL_hip, FL_thigh, FL_calf, FR_hip, ...
-  const positions = JOINT_DEFS.map(([name]) => joints[name]);
-  sendCmd({cmd: 'servos', positions});
-}
-
-function centerAll() {
-  JOINT_DEFS.forEach(([name]) => {
-    joints[name] = 90;
-    document.getElementById('j-' + name).value = 90;
-    document.getElementById('jv-' + name).textContent = '90';
-  });
-  updateQuadSVG();
-  sendServos();
-}
-
-function relaxAll() {
-  JOINT_DEFS.forEach(([name]) => {
-    joints[name] = 0;
-    document.getElementById('j-' + name).value = 0;
-    document.getElementById('jv-' + name).textContent = '0';
-  });
-  updateQuadSVG();
-  sendServos();
-}
-
-// ==================== QUADRUPED SVG ====================
-function updateQuadSVG() {
-  const deg2rad = d => d * Math.PI / 180;
-  // Leg geometry: shoulder length 45, calf length 40
-  const SHOULDER = 45, CALF = 40;
-
-  ['fl','fr','rl','rr'].forEach(leg => {
-    const isFront = leg.startsWith('f');
-    const isLeft = leg.endsWith('l');
-    const hip = joints[leg + '_hip'];
-    const thigh = joints[leg + '_thigh'];
-    const calf = joints[leg + '_calf'];
-
-    // Hip angle: deviation from straight (0=forward/back, 90=straight down)
-    const hipAngle = deg2rad(hip - 90);
-    // Thigh angle from body axis
-    const thighAngle = deg2rad(thigh - 90);
-    // Calf relative to thigh
-    const calfAngle = deg2rad(calf - 90);
-
-    const dir = isFront ? -1 : 1;
-    const side = isLeft ? -1 : 1;
-
-    // Hip endpoint
-    const hx = side * 20 * Math.cos(hipAngle);
-    const hy = dir * 20 * Math.sin(hipAngle);
-
-    // Thigh endpoint
-    const tx = hx + side * SHOULDER * Math.cos(thighAngle);
-    const ty = hy + dir * SHOULDER * Math.sin(thighAngle);
-
-    // Calf endpoint
-    const totalAngle = thighAngle + calfAngle;
-    const cx = tx + side * CALF * Math.cos(totalAngle);
-    const cy = ty + dir * CALF * Math.sin(totalAngle);
-
-    const thighEl = document.getElementById(leg + '-thigh');
-    const calfEl = document.getElementById(leg + '-calf');
-    if (thighEl) {
-      thighEl.setAttribute('x2', Math.round(hx));
-      thighEl.setAttribute('y2', Math.round(hy));
-    }
-    if (calfEl) {
-      calfEl.setAttribute('x1', Math.round(hx));
-      calfEl.setAttribute('y1', Math.round(hy));
-      calfEl.setAttribute('x2', Math.round(tx));
-      calfEl.setAttribute('y2', Math.round(ty));
-    }
+function onJ(n,v){joints[n]=+v;document.getElementById('jv-'+n).textContent=v;updateQuad();clearTimeout(onJ._t);onJ._t=setTimeout(sendServos,80)}
+function sendServos(){sendCmd({cmd:'servos',positions:JOINTS.map(([n])=>joints[n])})}
+function centerAll(){JOINTS.forEach(([n])=>{joints[n]=90;document.getElementById('j-'+n).value=90;document.getElementById('jv-'+n).textContent='90'});updateQuad();sendServos()}
+function relaxAll(){JOINTS.forEach(([n])=>{joints[n]=0;document.getElementById('j-'+n).value=0;document.getElementById('jv-'+n).textContent='0'});updateQuad();sendServos()}
+function updateQuad(){
+  const r=d=>d*Math.PI/180,S=42,C=38;
+  ['fl','fr','rl','rr'].forEach(leg=>{
+    const f=leg[0]==='f',l=leg[1]==='l';
+    const hip=r(joints[leg+'_hip']-90),th=r(joints[leg+'_thigh']-90),ca=r(joints[leg+'_calf']-90);
+    const dir=f?-1:1,side=l?-1:1;
+    const bx=l?190:310,by=f?130:170;
+    const hx=bx+side*18*Math.cos(hip),hy=by+dir*18*Math.sin(hip);
+    const tx=hx+side*S*Math.cos(th),ty=hy+dir*S*Math.sin(th);
+    const total=th+ca,cx=tx+side*C*Math.cos(total),cy=ty+dir*C*Math.sin(total);
+    const set=(id,x1,y1,x2,y2)=>{const e=document.getElementById(id);if(e){e.setAttribute('x1',x1);e.setAttribute('y1',y1);e.setAttribute('x2',x2);e.setAttribute('y2',y2)}};
+    set(leg+'-s',bx,by,Math.round(hx),Math.round(hy));
+    set(leg+'-k',Math.round(hx),Math.round(hy),Math.round(tx),Math.round(ty));
+    set(leg+'-f',Math.round(tx),Math.round(ty),Math.round(cx),Math.round(cy));
   });
 }
-
-// ==================== SENSORS → DOM ====================
-function updateSensors(d) {
-  // MPU
-  if (d.mpu) {
-    const [ax,ay,az,gx,gy,gz] = d.mpu;
-    const mg = v => Math.round(v / 16384 * 1000);
-    document.getElementById('s-ax').innerHTML = mg(ax) + '<span class="sensor-unit">mg</span>';
-    document.getElementById('s-ay').textContent = mg(ay);
-    document.getElementById('s-az').textContent = mg(az);
-    document.getElementById('s-gx').textContent = gx;
-    document.getElementById('s-gy').textContent = gy;
-    document.getElementById('s-gz').textContent = gz;
-    // Compute pitch/roll from accel
-    const pitch = Math.atan2(ay, Math.sqrt(ax*ax + az*az)) * 180 / Math.PI;
-    const roll = Math.atan2(-ax, Math.sqrt(ay*ay + az*az)) * 180 / Math.PI;
-    document.getElementById('q-pitch').textContent = pitch.toFixed(1);
-    document.getElementById('q-roll').textContent = roll.toFixed(1);
+function updateSensors(d){
+  if(d.mpu){const[ax,ay,az,gx,gy,gz]=d.mpu;const mg=v=>Math.round(v/16384*1000);
+    document.getElementById('s-ax').innerHTML=mg(ax)+'<span class="sr-unit">mg</span>';
+    document.getElementById('s-mpu-detail').textContent='ax '+mg(ay)+' ay '+mg(az)+' az';
+    const p=Math.atan2(ay,Math.sqrt(ax*ax+az*az))*180/Math.PI;
+    const rl=Math.atan2(-ax,Math.sqrt(ay*ay+az*az))*180/Math.PI;
+    document.getElementById('q-pitch').innerHTML=p.toFixed(1)+'<span class="qstat-unit">deg</span>';
+    document.getElementById('q-roll').innerHTML=rl.toFixed(1)+'<span class="qstat-unit">deg</span>';
   }
-  // VL53
-  if (d.vl53_mm !== null && d.vl53_mm !== undefined) {
-    document.getElementById('s-vl').innerHTML = d.vl53_mm + '<span class="sensor-unit">mm</span>';
-    document.getElementById('s-vl-status').textContent = d.vl53_mm < 200 ? 'close' : 'ok';
-    document.getElementById('s-vl-status').style.color = d.vl53_mm < 200 ? 'var(--yellow)' : 'var(--green)';
-    document.getElementById('q-height').textContent = d.vl53_mm + ' mm';
+  if(d.vl53_mm!=null){document.getElementById('s-vl').innerHTML=d.vl53_mm+'<span class="sr-unit">mm</span>';
+    const s=document.getElementById('s-vl-status');s.textContent=d.vl53_mm<200?'close':'ok';s.className='sr-status '+(d.vl53_mm<200?'warn':'ok');
+    document.getElementById('q-height').innerHTML=d.vl53_mm+'<span class="qstat-unit">mm</span>';
   }
-  // INA219
-  if (d.ina) {
-    const v = d.ina.voltage_v !== undefined ? d.ina.voltage_v : d.ina.bus_v;
-    const ma = d.ina.current_ma !== undefined ? d.ina.current_ma : d.ina.current_ma_est;
-    document.getElementById('s-v').innerHTML = (v !== null && v !== undefined ? v : '—') + '<span class="sensor-unit">V</span>';
-    document.getElementById('s-ma').textContent = (ma !== null && ma !== undefined ? ma : '—');
+  if(d.ina){const v=d.ina.voltage_v??d.ina.bus_v,ma=d.ina.current_ma??d.ina.current_ma_est;
+    document.getElementById('s-v').innerHTML=(v!=null?v:'--')+'<span class="sr-unit">V</span>';
+    document.getElementById('s-ma').textContent=ma!=null?ma:'--';
+    document.getElementById('q-voltage').innerHTML=(v!=null?v:'--')+'<span class="qstat-unit">V</span>';
+    document.getElementById('q-current').innerHTML=(ma!=null?ma:'--')+'<span class="qstat-unit">mA</span>';
   }
-  // GPS
-  if (d.gps) {
-    if (d.gps.lat !== undefined && d.gps.lon !== undefined) {
-      document.getElementById('s-gps').textContent = d.gps.fix ? 'FIX' : 'NO FIX';
-      document.getElementById('s-gps').style.color = d.gps.fix ? 'var(--green)' : 'var(--yellow)';
-      document.getElementById('s-gps-coord').textContent = d.gps.lat + ', ' + d.gps.lon;
-    } else if (d.gps.raw) {
-      document.getElementById('s-gps').textContent = d.gps.raw.substring(0, 16);
-      document.getElementById('s-gps-coord').textContent = 'parsing...';
-    }
-  }
-  // I2C
-  if (d.i2c0) {
-    document.getElementById('sys-i2c0').textContent = d.i2c0.map(h => h.toUpperCase()).join(' ') || 'none';
-  }
-  if (d.i2c1) {
-    document.getElementById('sys-i2c1').textContent = d.i2c1.map(h => h.toUpperCase()).join(' ') || 'none';
-  }
+  if(d.gps){if(d.gps.lat!=null){document.getElementById('s-gps').textContent=d.gps.lat.toFixed(4);
+    const s=document.getElementById('s-gps-status');s.textContent=d.gps.fix?'fix':'no fix';s.className='sr-status '+(d.gps.fix?'ok':'off');
+    document.getElementById('q-gps').innerHTML=d.gps.lat.toFixed(2)+'<span class="qstat-unit"></span>';
+  }else if(d.gps.raw){document.getElementById('s-gps').textContent=d.gps.raw.substring(0,14)}}
+  if(d.i2c0){document.getElementById('sys-i2c0').textContent=d.i2c0.map(h=>h.toUpperCase()).join(' ')||'none';document.getElementById('sb-i2c0').textContent=d.i2c0.length+' devs'}
+  if(d.i2c1){document.getElementById('sys-i2c1').textContent=d.i2c1.map(h=>h.toUpperCase()).join(' ')||'none';document.getElementById('sb-i2c1').textContent=d.i2c1.length+' devs'}
+  if(d.version){document.getElementById('sys-fw').textContent=d.version;document.getElementById('sb-fw').textContent=d.version}
 }
-
-// ==================== SEND COMMANDS ====================
-function sendCmd(payload) {
-  return fetch(API_BASE + '/api/bridge_cmd', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(payload)
-  }).then(r => r.json()).then(d => {
-    addLog('cmd', JSON.stringify(payload), 'ok');
-    return d;
-  }).catch(e => addLog('cmd', JSON.stringify(payload), 'err: ' + e.message));
+function sendCmd(p){return fetch(API+'/api/bridge_cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}).then(r=>r.json()).then(d=>{addLog('cmd',JSON.stringify(p).substring(0,80),'cmd');return d}).catch(e=>addLog('err',e.message,'err'))}
+function tftFill(){const h=document.getElementById('tft-color').value,r=parseInt(h.slice(1,3),16),g=parseInt(h.slice(3,5),16),b=parseInt(h.slice(5,7),16);sendCmd({cmd:'fill_color',color:((r>>3)<<11)|((g>>2)<<5)|(b>>3)})}
+function tftClear(){sendCmd({cmd:'fill_color',color:0})}
+function tftShowImage(){sendCmd({cmd:'show_image'})}
+function runDeploy(){addLog('deploy','git pull...','cmd');fetch(API+'/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:'cd /home/sipher/sipher && git pull origin main'})}).then(r=>r.json()).then(d=>{addLog('deploy',d.rc===0?'OK':'FAIL',d.rc===0?'ok':'err')}).catch(e=>addLog('err',e.message,'err'))}
+function sendRawCmd(){const i=document.getElementById('cmd-input'),v=i.value.trim();if(!v)return;i.value='';try{sendCmd(JSON.parse(v))}catch(e){addLog('err','bad JSON: '+e.message,'err')}}
+function poll(){const t0=performance.now();fetch(API+'/api/sensors').then(r=>r.json()).then(d=>{connected=true;document.getElementById('latency').textContent=Math.round(performance.now()-t0);updateSensors(d)}).catch(()=>{connected=false});
+  const dot=document.getElementById('conn-dot'),txt=document.getElementById('conn-text');
+  dot.className=connected?'dot on':'dot off';txt.textContent=connected?'connected':'disconnected';
 }
-
-function tftFill() {
-  const hex = document.getElementById('tft-color').value;
-  const rgb565 = hexToRgb565(hex);
-  sendCmd({cmd: 'fill_screen', color: rgb565});
-}
-
-function tftClear() {
-  sendCmd({cmd: 'fill_screen', color: 0x0000});
-}
-
-function tftShowImage() {
-  sendCmd({cmd: 'show_image'});
-}
-
-function hexToRgb565(hex) {
-  const r = parseInt(hex.slice(1,3), 16);
-  const g = parseInt(hex.slice(3,5), 16);
-  const b = parseInt(hex.slice(5,7), 16);
-  return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-}
-
-function runDeploy() {
-  addLog('deploy', 'git pull origin main', 'running...');
-  fetch(API_BASE + '/command', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({command: 'cd /home/sipher/sipher && git pull origin main'})
-  }).then(r => r.json()).then(d => {
-    addLog('deploy', d.stdout || d.stderr || d.error || 'done', d.rc === 0 ? 'ok' : 'err');
-  }).catch(e => addLog('deploy', e.message, 'err'));
-}
-
-// ==================== POLLING ====================
-function poll() {
-  const t0 = performance.now();
-  fetch(API_BASE + '/api/sensors')
-    .then(r => r.json())
-    .then(d => {
-      connected = true;
-      const latency = Math.round(performance.now() - t0);
-      document.getElementById('latency').textContent = latency;
-      updateSensors(d);
-      // Check for dashboard tick (has cmd=dashboard_tick)
-      if (d.cmd === 'dashboard_tick') {
-        lastTick = Date.now();
-      }
-    })
-    .catch(() => { connected = false; });
-  // Update connection indicator
-  const dot = document.getElementById('conn-dot');
-  const txt = document.getElementById('conn-text');
-  if (connected) {
-    dot.className = 'dot on';
-    txt.textContent = 'connected';
-  } else {
-    dot.className = 'dot off';
-    txt.textContent = 'disconnected';
-  }
-}
-
-function pollInfo() {
-  fetch(API_BASE + '/api/info').then(r => r.json()).then(d => {
-    document.getElementById('pi-ip').textContent = d.pi_ip || location.hostname;
-    document.getElementById('uptime').textContent = d.uptime ? Math.round(d.uptime) + 's' : '—';
-  }).catch(() => {});
-}
-
-// ==================== LOG ====================
-function addLog(src, msg, status) {
-  const box = document.getElementById('log-box');
-  const ts = new Date().toLocaleTimeString('en-GB', {hour12:false});
-  const cls = status === 'ok' ? 'ok' : status === 'err' ? 'err' : status === 'warn' ? 'warn' : '';
-  box.innerHTML += `<div><span class="ts">${ts}</span> <span class="${cls}">[${src}]</span> ${msg}</div>`;
-  box.scrollTop = box.scrollHeight;
-  // Keep last 50 lines
-  while (box.children.length > 50) box.removeChild(box.firstChild);
-}
-
-// ==================== BOOT ====================
-initJoints();
-updateQuadSVG();
-pollInfo();
-setInterval(poll, POLL_MS);
-poll();
-setInterval(pollInfo, 10000);
-addLog('boot', 'Sipher Mission Control ready', 'ok');
+function pollInfo(){fetch(API+'/api/info').then(r=>r.json()).then(d=>{document.getElementById('pi-ip').textContent=d.pi_ip||location.hostname;document.getElementById('uptime').textContent=d.uptime?Math.round(d.uptime)+'s':'--'}).catch(()=>{})}
+function addLog(src,msg,cls){const b=document.getElementById('log-box'),ts=new Date().toLocaleTimeString('en-GB',{hour12:false});b.innerHTML+='<div><span class="ts">'+ts+'</span> <span class="'+(cls||'')+'">['+src+']</span> '+msg+'</div>';b.scrollTop=b.scrollHeight;while(b.children.length>50)b.removeChild(b.firstChild)}
+initJoints();updateQuad();pollInfo();setInterval(poll,1000);poll();setInterval(pollInfo,10000);addLog('boot','Sipher Mission Control ready','ok');
 </script>
 </body>
 </html>
