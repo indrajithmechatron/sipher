@@ -45,7 +45,7 @@ export function MenuBar({ crumbs }: { crumbs: string[] }) {
             <span className="block size-1.5 rounded-[1px] bg-signal" />
           </span>
           <span className="font-mono text-[11px] tracking-[0.2em] text-foreground/80 uppercase">
-            Quadruped<span className="text-signal">·</span>MC
+            Sipher<span className="text-signal">·</span>MC
           </span>
         </div>
 
@@ -114,7 +114,7 @@ export function MenuBar({ crumbs }: { crumbs: string[] }) {
           </span>
         ))}
         <span className="ml-auto text-[10px] text-muted-foreground/60">
-          spot-alpha · fw 4.19.2 · ros humble
+          sipher · Pico 2 W · MicroPython 3.4
         </span>
       </div>
     </header>

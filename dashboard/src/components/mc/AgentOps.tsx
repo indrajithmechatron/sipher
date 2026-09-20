@@ -1,7 +1,7 @@
 import { AlertTriangle, ShieldAlert, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dot, Chip } from "./chrome";
-import type { Agent, LiveEvent, Telemetry } from "./sim";
+import type { Agent, LiveEvent, Telemetry } from "./sipher";
 
 const stateTone: Record<string, "ok" | "warn" | "danger" | "signal" | "muted"> = {
   running: "signal",

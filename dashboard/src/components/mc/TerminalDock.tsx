@@ -3,7 +3,7 @@ import { ChevronDown, ExternalLink, Maximize2, Minus, Plus, X } from "lucide-rea
 import { TERMINALS, TERMINAL_LINES } from "./data";
 import { cn } from "@/lib/utils";
 import { Dot } from "./chrome";
-import type { Telemetry } from "./sim";
+import type { Telemetry } from "./sipher";
 
 const colorFor: Record<string, string> = {
   fg: "text-foreground/85",
@@ -51,7 +51,7 @@ export function TerminalDock({
   onToggle: () => void;
   tele: Telemetry;
 }) {
-  const [active, setActive] = useState("ros");
+  const [active, setActive] = useState("sensors");
   const [menu, setMenu] = useState(false);
 
   return (

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chrome";
-import type { Telemetry } from "./sim";
+import type { Telemetry } from "./sipher";
 
 type Shading = "solid" | "wireframe" | "xray";
 
