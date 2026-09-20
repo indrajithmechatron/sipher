@@ -1,0 +1,11 @@
+[Unit]
+Description=Sipher Git deploy pull
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/sipher/deploy/update.sh
+WorkingDirectory=/home/sipher/sipher
+User=sipher
+Group=sipher
