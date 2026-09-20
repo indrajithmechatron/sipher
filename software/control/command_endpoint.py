@@ -31,7 +31,8 @@ PICO_BAUD = int(os.environ.get("SIPHER_PICO_BAUD", "115200"))
 REPO_DIR = os.environ.get("SIPHER_REPO_DIR", "/home/sipher/sipher")
 BRIDGE_SENSOR_URL = os.environ.get("SIPHER_BRIDGE_SENSOR_URL", "http://localhost:5001/sensor")
 BRIDGE_CMD_URL = os.environ.get("SIPHER_BRIDGE_CMD_URL", "http://localhost:5001/api/bridge_cmd")
-DASHBOARD_PATH = pathlib.Path(__file__).parent.parent / "dashboard" / "index.html"
+_THIS_DIR = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
+DASHBOARD_PATH = _THIS_DIR.parent / "dashboard" / "index.html"
 
 # ---------------------------------------------------------------------------
 # Sensor data — polled from bridge HTTP endpoint (port 5001)
@@ -66,12 +67,19 @@ _dashboard_html = None
 
 def load_dashboard():
     global _dashboard_html
-    if DASHBOARD_PATH.exists():
-        _dashboard_html = DASHBOARD_PATH.read_text(encoding="utf-8")
-        print(f"[http] loaded dashboard from {DASHBOARD_PATH}", flush=True)
-    else:
-        _dashboard_html = "<h1>Dashboard not found</h1><p>Expected at: " + str(DASHBOARD_PATH) + "</p>"
-        print(f"[http] WARNING: dashboard not found at {DASHBOARD_PATH}", flush=True)
+    # Try multiple paths
+    candidates = [
+        _THIS_DIR.parent / "dashboard" / "index.html",
+        pathlib.Path(REPO_DIR) / "software" / "dashboard" / "index.html",
+        pathlib.Path("/home/sipher/sipher/software/dashboard/index.html"),
+    ]
+    for p in candidates:
+        if p.exists():
+            _dashboard_html = p.read_text(encoding="utf-8")
+            print(f"[http] loaded dashboard from {p}", flush=True)
+            return
+    _dashboard_html = "<h1>Dashboard not found</h1><p>Searched: " + "<br>".join(str(p) for p in candidates) + "</p>"
+    print(f"[http] WARNING: dashboard not found, searched {len(candidates)} paths", flush=True)
 
 # ---------------------------------------------------------------------------
 # Restricted command execution
