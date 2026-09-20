@@ -164,11 +164,11 @@ def _tft_init_spi():
     if _TFT_SPI is not None:
         return _TFT_SPI
     try:
-        _TFT_SPI = machine.SPI(0, baudrate=40_000_000, polarity=0, phase=0,
+        _TFT_SPI = machine.SPI(0, freq=40_000_000, polarity=0, phase=0,
                                 sck=machine.Pin(18), mosi=machine.Pin(19),
                                 miso=machine.Pin(16))
     except Exception as e:
-        print(f"[pico] SPI init error: {e}", flush=True)
+        print(f"[pico] SPI init error: {e}")
         _TFT_SPI = None
     return _TFT_SPI
 
@@ -192,7 +192,7 @@ def _tft_data(d):
 
 def tft_init():
     """Initialize TFT. Returns True/False. Must be called after boot_logo."""
-    print("[pico] tft_init start", flush=True)
+    print("[pico] tft_init start")
     try:
         _TFT_RST.value(0)
         time.sleep_ms(10)
@@ -205,10 +205,10 @@ def tft_init():
         _tft_cmd(0x36); _tft_data(b'\x00')  # MIPI RGB
         _tft_cmd(0x29)  # display on
         time.sleep_ms(50)
-        print("[pico] tft_init OK", flush=True)
+        print("[pico] tft_init OK")
         return True
     except Exception as e:
-        print(f"[pico] tft_init FAIL: {e}", flush=True)
+        print(f"[pico] tft_init FAIL: {e}")
         return False
 
 def tft_fill(color):
@@ -383,9 +383,9 @@ _dashboard_running = False
 # Main loop — read JSON lines from USB, dispatch, write JSON back
 # ---------------------------------------------------------------------------
 def main():
-    print("[pico] main() entered", flush=True)
+    print("[pico] main() entered")
     tft_ok = tft_init()
-    print(_json.dumps({"version": "sipher-pico-main-v2-corr", "tft": tft_ok, "ready": True}), flush=True)
+    print(_json.dumps({"version": "sipher-pico-main-v2-corr", "tft": tft_ok, "ready": True}))
     buf = b""
     while True:
         try:
@@ -402,7 +402,7 @@ def main():
                 try:
                     req = _json.loads(line)
                 except Exception:
-                    print(_json.dumps({"error": "bad json"}), flush=True)
+                    print(_json.dumps({"error": "bad json"}))
                     continue
                 cmd = req.get("cmd", "")
                 handler = CMD_MAP.get(cmd)
@@ -424,7 +424,7 @@ def main():
                 print(_json.dumps(sensors))
                 sys.stdout.flush()
         except Exception as e:
-            print(_json.dumps({"error": str(e)}), flush=True)
+            print(_json.dumps({"error": str(e)}))
             sys.stdout.flush()
             buf = b""
             time.sleep_ms(100)
