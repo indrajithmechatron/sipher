@@ -1,0 +1,161 @@
+name: Security Daily Summary
+
+on:
+  schedule:
+    - cron: '0 23 * * *'  # 23:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  daily-scan-and-email:
+    name: Run Scans & Send Summary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        id: gitleaks
+        continue-on-error: true
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+      - name: Run Semgrep SAST
+        id: semgrep
+        continue-on-error: true
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/python
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run OSV Scanner
+        id: osv
+        continue-on-error: true
+        uses: google/osv-scanner-action/osv-scanner-action@v1.9.0
+        with:
+          scan-args: |-
+            -r
+            --skip-git
+            ./
+
+      - name: Generate Summary
+        id: summary
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          DATE=$(date -u '+%Y-%m-%d')
+
+          # Gitleaks result
+          if [ "${{ steps.gitleaks.outcome }}" = "success" ]; then
+            GITLEAKS_STATUS="PASS"
+            GITLEAKS_EMOJI="✅"
+          else
+            GITLEAKS_STATUS="FAIL"
+            GITLEAKS_EMOJI="🚨"
+          fi
+
+          # Semgrep result
+          if [ "${{ steps.semgrep.outcome }}" = "success" ]; then
+            SEMGREP_STATUS="PASS"
+            SEMGREP_EMOJI="✅"
+          else
+            SEMGREP_STATUS="FAIL"
+            SEMGREP_EMOJI="⚠️"
+          fi
+
+          # OSV result
+          if [ "${{ steps.osv.outcome }}" = "success" ]; then
+            OSV_STATUS="PASS"
+            OSV_EMOJI="✅"
+          else
+            OSV_STATUS="FAIL"
+            OSV_EMOJI="⚠️"
+          fi
+
+          # Overall status
+          if [ "${{ steps.gitleaks.outcome }}" = "success" ] && \
+             [ "${{ steps.semgrep.outcome }}" = "success" ] && \
+             [ "${{ steps.osv.outcome }}" = "success" ]; then
+            OVERALL="ALL CLEAR"
+            OVERALL_COLOR="#22c55e"
+          else
+            OVERALL="ISSUES FOUND"
+            OVERALL_COLOR="#ef4444"
+          fi
+
+          cat > /tmp/summary.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="utf-8"></head>
+          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f9fafb;">
+            <div style="background: #111827; color: white; padding: 24px; border-radius: 12px 12px 0 0;">
+              <h1 style="margin: 0; font-size: 20px;">🛡️ Sipher Security Daily Report</h1>
+              <p style="margin: 8px 0 0; color: #9ca3af; font-size: 14px;">DATE_PLACEHOLDER</p>
+            </div>
+            <div style="background: white; padding: 24px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
+              <div style="background: BG_COLOR; color: white; padding: 12px 16px; border-radius: 8px; text-align: center; margin-bottom: 20px;">
+                <strong style="font-size: 16px;">OVERALL_PLACEHOLDER</strong>
+              </div>
+              <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                <tr style="border-bottom: 1px solid #e5e7eb;">
+                  <td style="padding: 12px 8px;"><strong>Scan</strong></td>
+                  <td style="padding: 12px 8px; text-align: center;"><strong>Status</strong></td>
+                </tr>
+                <tr style="border-bottom: 1px solid #f3f4f6;">
+                  <td style="padding: 12px 8px;">EMOJI_G Gitleaks (Secret Detection)</td>
+                  <td style="padding: 12px 8px; text-align: center;">STATUS_G</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #f3f4f6;">
+                  <td style="padding: 12px 8px;">EMOJI_S Semgrep (SAST Analysis)</td>
+                  <td style="padding: 12px 8px; text-align: center;">STATUS_S</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 8px;">EMOJI_O OSV (Dependency Vulnerabilities)</td>
+                  <td style="padding: 12px 8px; text-align: center;">STATUS_O</td>
+                </tr>
+              </table>
+              <div style="text-align: center; margin-top: 24px;">
+                <a href="RUN_URL_PLACEHOLDER" style="background: #3b82f6; color: white; padding: 10px 24px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 500;">View Full Report →</a>
+              </div>
+            </div>
+            <p style="text-align: center; color: #9ca3af; font-size: 12px; margin-top: 16px;">
+              Auto-generated by Sipher Security Pipeline
+            </p>
+          </body>
+          </html>
+          EOF
+
+          sed -i "s|DATE_PLACEHOLDER|$DATE|g" /tmp/summary.html
+          sed -i "s|OVERALL_PLACEHOLDER|$OVERALL|g" /tmp/summary.html
+          sed -i "s|BG_COLOR|$OVERALL_COLOR|g" /tmp/summary.html
+          sed -i "s|EMOJI_G|$GITLEAKS_EMOJI|g" /tmp/summary.html
+          sed -i "s|STATUS_G|$GITLEAKS_STATUS|g" /tmp/summary.html
+          sed -i "s|EMOJI_S|$SEMGREP_EMOJI|g" /tmp/summary.html
+          sed -i "s|STATUS_S|$SEMGREP_STATUS|g" /tmp/summary.html
+          sed -i "s|EMOJI_O|$OSV_EMOJI|g" /tmp/summary.html
+          sed -i "s|STATUS_O|$OSV_STATUS|g" /tmp/summary.html
+          sed -i "s|RUN_URL_PLACEHOLDER|$RUN_URL|g" /tmp/summary.html
+
+          echo "overall=$OVERALL" >> "$GITHUB_OUTPUT"
+
+      - name: Send Email Summary
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "🛡️ Sipher Security Report — ${{ steps.summary.outputs.overall }}"
+          to: ${{ secrets.EMAIL_TO }}
+          from: ${{ secrets.EMAIL_FROM }}
+          html_body: file:///tmp/summary.html
