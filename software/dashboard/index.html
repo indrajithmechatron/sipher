@@ -4,316 +4,627 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sipher Mission Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-:root {
-  --bg0:#09090b;--bg1:#111113;--bg2:#18181b;--bg3:#1f1f23;
-  --bd:#27272a;--bdh:#3f3f46;
-  --tx:#fafafa;--t2:#a1a1aa;--t3:#71717a;--t4:#52525b;
-  --ac:#38bdf8;--acd:#0c4a6e;
-  --gn:#22c55e;--gnd:#14532d;
-  --yl:#eab308;--yld:#422006;
-  --rd:#ef4444;--rdd:#450a0a;
-  --pu:#a78bfa;--pud:#2e1065;
-  --or:#fb923c;
-}
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
-body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg0);color:var(--tx);display:flex;flex-direction:column;overflow:hidden}
-.topbar{height:40px;display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--bg1);border-bottom:1px solid var(--bd);flex-shrink:0;z-index:100;font-size:12px;user-select:none}
-.logo{font-weight:700;font-size:13px;letter-spacing:.5px}
-.logo em{font-style:normal;color:var(--ac)}
-.sep{width:1px;height:16px;background:var(--bd)}
-.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;background:var(--bg2);border:1px solid var(--bd);font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--t2)}
-.dot{width:6px;height:6px;border-radius:50%}
-.dot.on{background:var(--gn);box-shadow:0 0 8px var(--gn)}
-.dot.off{background:var(--rd)}
-.spacer{flex:1}
-.m{color:var(--t3);font-size:11px}.m b{color:var(--t2);font-weight:500}
-.layout{display:flex;flex:1;overflow:hidden}
-.sidebar{width:220px;flex-shrink:0;background:var(--bg1);border-right:1px solid var(--bd);display:flex;flex-direction:column;overflow-y:auto}
-.sidebar-section{padding:12px 12px 4px}
-.sidebar-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--t4);margin-bottom:6px}
-.tree-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;font-size:12px;color:var(--t2);cursor:pointer;transition:all .1s}
-.tree-item:hover{background:var(--bg3);color:var(--tx)}
-.tree-item.active{background:var(--acd);color:var(--ac)}
-.tree-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
-.tree-dot.green{background:var(--gn)}.tree-dot.red{background:var(--rd)}.tree-dot.blue{background:var(--ac)}.tree-dot.purple{background:var(--pu)}.tree-dot.off{background:var(--t4)}
-.tree-icon{width:16px;text-align:center;color:var(--t4);font-size:10px}
+html,body,#root{height:100%}
+body{background:oklch(0.16 0.004 260);color:oklch(0.93 0.003 260);font-family:'Inter',system-ui,sans-serif;overflow:hidden;-webkit-font-smoothing:antialiased}
+
+/* === Design Tokens (from Lovable oklch system) === */
+:root{
+  --bg:oklch(0.16 0.004 260);--fg:oklch(0.93 0.003 260);
+  --chrome:oklch(0.19 0.004 260);--panel:oklch(0.215 0.004 260);--panel-raised:oklch(0.255 0.005 260);--rail:oklch(0.135 0.004 260);
+  --hairline:oklch(0.3 0.005 260);
+  --signal:oklch(0.82 0.115 200);--signal-dim:oklch(0.55 0.06 205);
+  --ok:oklch(0.78 0.13 155);--warn:oklch(0.82 0.13 78);--danger:oklch(0.66 0.19 22);--violet:oklch(0.72 0.11 300);
+  --accent:oklch(0.3 0.008 260);
+}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:oklch(0.34 0.005 260);border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:oklch(0.42 0.006 260)}
+
+/* === Layout === */
+.app{display:flex;flex-direction:column;height:100vh}
+.main-area{flex:1;display:flex;overflow:hidden;min-height:0}
+.sidebar{width:220px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--hairline);display:flex;flex-direction:column;min-height:0}
+.center{flex:1;display:flex;flex-direction:column;min-width:0}
+.inspector{width:320px;flex-shrink:0;background:var(--panel);border-left:1px solid var(--hairline);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+
+/* === Header === */
+.header{flex-shrink:0}
+.menubar{display:flex;align-items:center;height:36px;background:var(--rail);border-bottom:1px solid var(--hairline);padding:0 12px;gap:4px;user-select:none}
+.menubar .logo{display:flex;align-items:center;gap:8px;margin-right:12px}
+.menubar .logo-icon{width:16px;height:16px;border:1.5px solid var(--signal);background:oklch(0.82 0.115 200 / 0.1);display:grid;place-items:center;border-radius:3px}
+.menubar .logo-icon span{width:6px;height:6px;border-radius:1px;background:var(--signal)}
+.menubar .logo-text{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.2em;color:oklch(0.93 0.003 260 / 0.8);text-transform:uppercase}
+.menubar .logo-text b{color:var(--signal);font-weight:700}
+.menu-item{padding:4px 8px;border-radius:3px;font-size:12px;color:var(--fg);cursor:pointer;transition:background 0.1s}
+.menu-item:hover{background:var(--accent)}
+.menubar-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.menubar-right .pill{display:flex;align-items:center;gap:5px;font-family:'JetBrains Mono',monospace;font-size:10px;color:oklch(0.66 0.006 260)}
+.breadcrumb{display:flex;align-items:center;height:28px;background:var(--chrome);border-bottom:1px solid var(--hairline);padding:0 12px;font-family:'JetBrains Mono',monospace;font-size:11px;gap:4px}
+.breadcrumb .sep{color:oklch(0.66 0.006 260 / 0.5);font-size:10px}
+.breadcrumb .crumb{color:oklch(0.66 0.006 260);cursor:pointer}
+.breadcrumb .crumb:last-child{color:var(--signal)}
+.breadcrumb .crumb:hover{color:var(--fg)}
+.breadcrumb .robot-info{margin-left:auto;font-size:10px;color:oklch(0.66 0.006 260)}
+
+/* === Dot === */
+.dot{display:inline-block;width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.danger{background:var(--danger)}.dot.signal{background:var(--signal);animation:pulse-dot 1.6s ease-in-out infinite}.dot.muted{background:oklch(0.66 0.006 260)}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:0.3}}
+
+/* === Chip === */
+.chip{display:inline-flex;border-radius:3px;padding:2px 6px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.04em;cursor:pointer;transition:all 0.12s;border:1px solid var(--hairline);color:oklch(0.66 0.006 260);white-space:nowrap}
+.chip:hover{background:var(--accent);color:var(--fg)}
+.chip.active{border-color:oklch(0.82 0.115 200 / 0.5);background:oklch(0.82 0.115 200 / 0.1);color:var(--signal)}
+
+/* === Explorer === */
+.explorer-search{display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--hairline)}
+.explorer-search input{background:none;border:none;outline:none;color:var(--fg);font-family:'JetBrains Mono',monospace;font-size:11px;width:100%}
+.explorer-search input::placeholder{color:oklch(0.66 0.006 260 / 0.6)}
+.tree-group-header{display:flex;align-items:center;gap:4px;padding:4px 8px;cursor:pointer;user-select:none}
+.tree-group-header:hover{background:oklch(0.3 0.008 260 / 0.3)}
+.tree-group-header .chevron{color:oklch(0.66 0.006 260);font-size:8px;width:10px;text-align:center}
+.tree-group-header .label{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.16em;color:oklch(0.66 0.006 260);text-transform:uppercase}
+.tree-group-header .count{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10px;color:oklch(0.66 0.006 260 / 0.5)}
+.tree-item{display:flex;align-items:center;gap:6px;padding:3px 8px 3px 28px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:11px;color:oklch(0.93 0.003 260 / 0.85);transition:background 0.1s}
+.tree-item:hover{background:oklch(0.3 0.008 260 / 0.4)}
+.tree-item.active{background:oklch(0.82 0.115 200 / 0.1);position:relative}
+.tree-item.active::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--signal)}
+.tree-item.active .tree-label{color:var(--signal)}
 .tree-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tree-badge{font-size:9px;padding:1px 5px;border-radius:6px;background:var(--bg3);color:var(--t4)}
-.tree-badge.ok{background:var(--gnd);color:var(--gn)}
-.sidebar-footer{margin-top:auto;padding:10px 12px;border-top:1px solid var(--bd);font-size:10px;color:var(--t4)}
-.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
-.viz-area{flex:1;display:flex;gap:0;overflow:hidden}
-.viz-left{flex:1;display:flex;flex-direction:column;padding:12px;gap:12px;overflow-y:auto}
-.viz-right{width:300px;flex-shrink:0;border-left:1px solid var(--bd);display:flex;flex-direction:column;overflow-y:auto;padding:12px;gap:12px}
-.card{background:var(--bg1);border:1px solid var(--bd);border-radius:8px;overflow:hidden}
-.card-head{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--bd)}
-.card-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--t3)}
-.card-tag{font-size:10px;padding:2px 7px;border-radius:8px;background:var(--bg3);color:var(--t4);font-family:'JetBrains Mono',monospace}
-.card-body{padding:14px}
-.quad-card{flex:1;min-height:300px;display:flex;flex-direction:column}
-.quad-card .card-body{flex:1;display:flex;flex-direction:column;padding:0}
-.quad-canvas{flex:1;width:100%;background:radial-gradient(ellipse at center,var(--bg2) 0%,var(--bg0) 100%)}
-.quad-canvas svg{width:100%;height:100%}
-.quad-stats{display:flex;gap:20px;padding:10px 14px;border-top:1px solid var(--bd)}
-.qstat{text-align:center;min-width:50px}
-.qstat-label{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--t4)}
-.qstat-value{font-size:15px;font-weight:600;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
-.qstat-unit{font-size:10px;color:var(--t4);margin-left:2px}
-.joints-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.leg-group{background:var(--bg2);border-radius:6px;padding:10px}
-.leg-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;text-align:center}
-.leg-title.fl{color:var(--ac)}.leg-title.fr{color:var(--pu)}.leg-title.rl{color:var(--gn)}.leg-title.rr{color:var(--or)}
-.jrow{display:flex;align-items:center;gap:6px;margin-bottom:5px}.jrow:last-child{margin-bottom:0}
-.jlbl{font-size:10px;color:var(--t4);min-width:32px;text-align:right;font-family:'JetBrains Mono',monospace}
-.jslider{flex:1;height:3px;-webkit-appearance:none;appearance:none;background:var(--bg3);border-radius:2px;outline:none}
-.jslider::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:var(--ac);cursor:pointer;border:2px solid var(--bg0)}
-.jval{font-size:10px;color:var(--t2);min-width:24px;text-align:center;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
-.sensor-row{display:flex;align-items:baseline;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bd)}
-.sensor-row:last-child{border-bottom:none}
-.sr-name{font-size:11px;font-weight:500;color:var(--t2)}
-.sr-sub{font-size:10px;color:var(--t4);margin-top:1px;font-family:'JetBrains Mono',monospace}
-.sr-val{font-size:15px;font-weight:600;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
-.sr-unit{font-size:10px;color:var(--t4);margin-left:2px}
-.sr-status{font-size:9px;margin-top:1px}
-.sr-status.ok{color:var(--gn)}.sr-status.warn{color:var(--yl)}.sr-status.off{color:var(--t4)}
-.sys-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--bd)}
-.sys-row:last-child{border-bottom:none}
-.sys-label{font-size:11px;color:var(--t3)}
-.sys-val{font-size:11px;color:var(--t2);font-family:'JetBrains Mono',monospace}
-.btn{background:var(--bg3);color:var(--t2);border:1px solid var(--bd);border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer;font-family:inherit;transition:all .12s;white-space:nowrap}
-.btn:hover{background:var(--bd);color:var(--tx);border-color:var(--bdh)}
-.btn.accent{background:var(--acd);color:var(--ac);border-color:var(--acd)}.btn.accent:hover{background:#0e5a8a}
-.btn.green{background:var(--gnd);color:var(--gn);border-color:var(--gnd)}.btn.green:hover{background:#166534}
-.btn.red{background:var(--rdd);color:var(--rd);border-color:var(--rdd)}.btn.red:hover{background:#7f1d1d}
-.btn.sm{padding:3px 8px;font-size:10px}
-.btn-group{display:flex;gap:4px;flex-wrap:wrap}
-.bottom-panel{height:140px;flex-shrink:0;border-top:1px solid var(--bd);display:flex;flex-direction:column}
-.bottom-tabs{display:flex;gap:0;padding:0 12px;background:var(--bg1);border-bottom:1px solid var(--bd)}
-.btab{padding:6px 14px;font-size:11px;color:var(--t4);cursor:pointer;border-bottom:2px solid transparent;transition:all .12s}
-.btab:hover{color:var(--t2)}.btab.active{color:var(--ac);border-bottom-color:var(--ac)}
-.log-content{flex:1;overflow-y:auto;padding:8px 14px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--t3);line-height:1.6}
-.log-content .ts{color:var(--t4)}.log-content .ok{color:var(--gn)}.log-content .err{color:var(--rd)}.log-content .cmd{color:var(--ac)}
-.cmd-input-row{display:flex;gap:6px;padding:6px 12px;border-top:1px solid var(--bd);background:var(--bg1)}
-.cmd-input{flex:1;background:var(--bg2);border:1px solid var(--bd);border-radius:4px;padding:4px 8px;color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:11px;outline:none}
-.cmd-input:focus{border-color:var(--ac)}.cmd-input::placeholder{color:var(--t4)}
-::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:2px}
-@media(max-width:900px){.sidebar{display:none}.viz-right{width:100%;border-left:none;border-top:1px solid var(--bd)}.viz-area{flex-direction:column}.joints-grid{grid-template-columns:repeat(2,1fr)}}
+.tree-meta{font-size:10px;color:oklch(0.66 0.006 260 / 0.7)}
+
+/* === Panel Header === */
+.panel-header{display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-bottom:1px solid var(--hairline);background:var(--chrome);flex-shrink:0}
+.panel-header .title{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.18em;color:oklch(0.66 0.006 260);text-transform:uppercase}
+.panel-header .right{margin-left:auto;display:flex;align-items:center;gap:6px}
+
+/* === Field === */
+.field{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:5px 12px;transition:background 0.1s}
+.field:hover{background:oklch(0.3 0.008 260 / 0.4)}
+.field .label{font-size:11px;color:oklch(0.66 0.006 260);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.field .value{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--fg);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* === Digital Twin === */
+.twin-container{flex:1;display:flex;min-height:0}
+.twin-viewport{flex:1;position:relative;background:var(--bg);min-width:0}
+.twin-viewport .grid-field{position:absolute;inset:0;background-image:linear-gradient(to right,oklch(1 0 0 / 3.5%) 1px,transparent 1px),linear-gradient(to bottom,oklch(1 0 0 / 3.5%) 1px,transparent 1px);background-size:28px 28px}
+.twin-viewport svg{width:100%;height:100%;max-width:520px;max-height:320px;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+.twin-overlay{position:absolute;top:12px;left:12px;pointer-events:none;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.2em;color:oklch(0.66 0.006 260);text-transform:uppercase}
+.twin-hud{position:absolute;top:12px;right:12px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:10px;color:oklch(0.66 0.006 260);pointer-events:none;line-height:1.7}
+.twin-hud .warn{color:var(--warn)}
+.twin-chips{position:absolute;bottom:12px;left:12px;display:flex;gap:6px;flex-wrap:wrap}
+.twin-chips .sep{width:1px;background:var(--hairline);margin:0 2px}
+
+/* === Attitude Gauge === */
+.gauge{position:absolute;bottom:12px;right:12px;width:112px;height:112px;border-radius:50%;border:1px solid var(--hairline);background:oklch(0.215 0.004 260 / 0.7);backdrop-filter:blur(4px)}
+.gauge svg{width:100%;height:100%}
+.gauge-label{position:absolute;inset-x:0;text-align:center;bottom:-16px;font-family:'JetBrains Mono',monospace;font-size:9px;color:oklch(0.66 0.006 260)}
+
+/* === Joint Panel === */
+.joint-panel{width:288px;flex-shrink:0;border-left:1px solid var(--hairline);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+.joint-list{flex:1;overflow-y:auto;min-height:0}
+.joint-item{display:block;width:100%;padding:6px 12px;border-bottom:1px solid oklch(0.3 0.005 260 / 0.6);text-align:left;cursor:pointer;transition:background 0.1s;background:none;border-left:none;border-right:none;border-top:none;font:inherit;color:inherit}
+.joint-item:hover{background:oklch(0.3 0.008 260 / 0.3)}
+.joint-item.active{background:oklch(0.82 0.115 200 / 0.05)}
+.joint-name{font-family:'JetBrains Mono',monospace;font-size:11px;color:oklch(0.93 0.003 260 / 0.85)}
+.joint-deg{font-family:'JetBrains Mono',monospace;font-size:11px;color:oklch(0.66 0.006 260);font-variant-numeric:tabular-nums}
+.joint-bar{height:3px;width:100%;overflow:hidden;border-radius:99px;background:var(--rail);margin-top:4px}
+.joint-bar-fill{height:100%;border-radius:99px;transition:width 0.15s}
+.joint-bar-fill.ok{background:var(--signal)}
+.joint-bar-fill.warn{background:var(--warn)}
+.joint-footer{border-top:1px solid var(--hairline);padding:8px 12px;background:var(--chrome)}
+.joint-footer .meta{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:10px;color:oklch(0.66 0.006 260)}
+
+/* === Inspector === */
+.inspector-section{border-bottom:1px solid var(--hairline)}
+.inspector-section-head{padding:4px 12px;background:var(--chrome);border-bottom:1px solid var(--hairline);font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.18em;color:oklch(0.66 0.006 260);text-transform:uppercase}
+
+/* === Terminal === */
+.terminal-dock{flex-shrink:0;display:flex;flex-direction:column;background:var(--chrome);border-top:1px solid var(--hairline)}
+.terminal-tabs{display:flex;align-items:center;height:32px;border-bottom:1px solid var(--hairline)}
+.terminal-tab{position:relative;height:100%;padding:0 12px;font-family:'JetBrains Mono',monospace;font-size:11px;color:oklch(0.66 0.006 260);cursor:pointer;transition:color 0.1s;background:none;border:none}
+.terminal-tab:hover{color:var(--fg)}
+.terminal-tab.active{color:var(--fg);background:var(--bg)}
+.terminal-tab.active::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--signal)}
+.terminal-body{height:120px;overflow-y:auto;padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.6}
+.terminal-body .muted{color:oklch(0.66 0.006 260)}
+.terminal-body .signal{color:var(--signal)}
+.terminal-body .warn{color:var(--warn)}
+.terminal-body .danger{color:var(--danger)}
+.terminal-body .ok{color:var(--ok)}
+.terminal-body .fg{color:oklch(0.93 0.003 260 / 0.85)}
+
+/* === Status Bar === */
+.statusbar{height:28px;display:flex;align-items:center;gap:12px;background:var(--rail);border-top:1px solid var(--hairline);padding:0 12px;font-family:'JetBrains Mono',monospace;font-size:10px;color:oklch(0.66 0.006 260);flex-shrink:0;user-select:none;overflow-x:auto}
+.statusbar .preset{display:flex;align-items:center;gap:4px;background:oklch(0.82 0.115 200 / 0.1);color:var(--signal);padding:1px 6px;border-radius:3px}
+.statusbar .sep{width:1px;height:12px;background:var(--hairline);flex-shrink:0}
+.statusbar .right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.statusbar .warn-text{color:var(--warn)}
+
+/* === Responsive === */
+@media(max-width:1100px){.inspector{display:none}.joint-panel{width:220px}}
+@media(max-width:800px){.sidebar{display:none}.joint-panel{display:none}}
 </style>
 </head>
 <body>
-<div class="topbar">
-  <div class="logo">SIPHER<em>MC</em></div><div class="sep"></div>
-  <div class="pill"><div class="dot" id="conn-dot"></div><span id="conn-text">connecting</span></div>
-  <div class="pill">ping <b id="latency">--</b>ms</div>
-  <div class="spacer"></div>
-  <div class="m">batt <b id="batt-v">--</b></div><div class="sep"></div>
-  <div class="m">uptime <b id="uptime">--</b></div>
-  <div class="m">pi <b id="pi-ip">--</b></div>
-</div>
-<div class="layout">
-  <div class="sidebar">
-    <div class="sidebar-section"><div class="sidebar-title">Explorer</div></div>
-    <div class="tree-item active"><span class="tree-icon">&gt;</span><span class="tree-label">Sipher</span></div>
-    <div class="sidebar-section">
-      <div class="sidebar-title">Hardware</div>
-      <div class="tree-item"><span class="tree-dot green"></span><span class="tree-label">Pico 2 W</span><span class="tree-badge ok" id="sb-pico">on</span></div>
-      <div class="tree-item"><span class="tree-dot green"></span><span class="tree-label">MPU6050</span><span class="tree-badge" id="sb-mpu">0x68</span></div>
-      <div class="tree-item"><span class="tree-dot green"></span><span class="tree-label">PCA9685</span><span class="tree-badge" id="sb-pca">0x40</span></div>
-      <div class="tree-item"><span class="tree-dot green"></span><span class="tree-label">INA219</span><span class="tree-badge" id="sb-ina">0x41</span></div>
-      <div class="tree-item"><span class="tree-dot green"></span><span class="tree-label">VL53L0X</span><span class="tree-badge" id="sb-vl">0x29</span></div>
-      <div class="tree-item"><span class="tree-dot off"></span><span class="tree-label">GPS NEO-6M</span><span class="tree-badge" id="sb-gps">UART</span></div>
+<div class="app" id="app">
+  <!-- HEADER -->
+  <div class="header">
+    <div class="menubar">
+      <div class="logo">
+        <div class="logo-icon"><span></span></div>
+        <span class="logo-text">Sipher<b>&middot;</b>MC</span>
+      </div>
+      <div class="menu-item">Robot</div>
+      <div class="menu-item">Sensors</div>
+      <div class="menu-item">Tools</div>
+      <div class="menu-item">Window</div>
+      <div class="menu-item">Help</div>
+      <div class="menubar-right">
+        <div class="pill"><span class="dot signal"></span> LINK <b id="link-ms">—</b> ms</div>
+        <div class="pill"><span class="dot ok"></span> PICO <b id="pico-status">—</b></div>
+      </div>
     </div>
-    <div class="sidebar-section">
-      <div class="sidebar-title">Peripherals</div>
-      <div class="tree-item"><span class="tree-dot blue"></span><span class="tree-label">ILI9341 TFT</span><span class="tree-badge">SPI0</span></div>
-      <div class="tree-item"><span class="tree-dot off"></span><span class="tree-label">nRF24L01+</span><span class="tree-badge" id="sb-nrf">off</span></div>
-    </div>
-    <div class="sidebar-section">
-      <div class="sidebar-title">I2C Bus</div>
-      <div class="tree-item"><span class="tree-dot purple"></span><span class="tree-label">I2C0 (GP8/9)</span><span class="tree-badge" id="sb-i2c0">--</span></div>
-      <div class="tree-item"><span class="tree-dot purple"></span><span class="tree-label">I2C1 (GP2/3)</span><span class="tree-badge" id="sb-i2c1">--</span></div>
-    </div>
-    <div class="sidebar-footer">
-      <div>fw <b id="sb-fw">--</b></div>
-      <div style="margin-top:3px">mem <b id="sb-mem">--</b></div>
+    <div class="breadcrumb">
+      <span class="crumb">Sipher</span>
+      <span class="sep">&rsaquo;</span>
+      <span class="crumb">Pico 2 W</span>
+      <span class="sep">&rsaquo;</span>
+      <span class="crumb">Dashboard</span>
+      <span class="robot-info" id="robot-info">sipher &middot; fw — &middot; pi 192.168.1.35</span>
     </div>
   </div>
-  <div class="main">
-    <div class="viz-area">
-      <div class="viz-left">
-        <div class="card quad-card">
-          <div class="card-head"><span class="card-title">Digital Twin</span><span class="card-tag">perspective</span></div>
-          <div class="card-body">
-            <div class="quad-canvas">
-              <svg id="quad-svg" viewBox="0 0 500 280" xmlns="http://www.w3.org/2000/svg">
-                <defs><pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse"><path d="M 30 0 L 0 0 0 30" fill="none" stroke="#1a1a1f" stroke-width="0.5"/></pattern></defs>
-                <rect width="500" height="280" fill="url(#grid)" opacity="0.5"/>
-                <ellipse cx="250" cy="230" rx="160" ry="18" fill="#111118" stroke="#222" stroke-width="0.5" stroke-dasharray="3,3"/>
-                <ellipse cx="252" cy="155" rx="80" ry="30" fill="#000" opacity="0.3"/>
-                <rect x="175" y="115" width="150" height="70" rx="14" fill="var(--bg2)" stroke="var(--bdh)" stroke-width="1.5"/>
-                <rect x="185" y="122" width="130" height="2" rx="1" fill="var(--ac)" opacity="0.25"/>
-                <text x="250" y="157" text-anchor="middle" fill="var(--t4)" font-size="11" font-family="JetBrains Mono,monospace" font-weight="500">SIPHER</text>
-                <rect x="235" y="107" width="30" height="10" rx="3" fill="var(--bg3)" stroke="var(--bd)" stroke-width="0.8"/>
-                <circle cx="245" cy="112" r="2" fill="var(--gn)" opacity="0.8"/><circle cx="255" cy="112" r="2" fill="var(--gn)" opacity="0.8"/>
-                <g id="leg-fl"><line id="fl-s" x1="190" y1="130" x2="148" y2="85" stroke="var(--ac)" stroke-width="3.5" stroke-linecap="round"/><line id="fl-k" x1="148" y1="85" x2="118" y2="42" stroke="var(--ac)" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/><line id="fl-f" x1="118" y1="42" x2="108" y2="25" stroke="var(--ac)" stroke-width="2" stroke-linecap="round" opacity="0.6"/><circle cx="108" cy="25" r="4" fill="var(--ac)" opacity="0.9"/><text x="95" y="20" fill="var(--ac)" font-size="9" font-family="JetBrains Mono" font-weight="600">FL</text></g>
-                <g id="leg-fr"><line id="fr-s" x1="310" y1="130" x2="352" y2="85" stroke="var(--pu)" stroke-width="3.5" stroke-linecap="round"/><line id="fr-k" x1="352" y1="85" x2="382" y2="42" stroke="var(--pu)" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/><line id="fr-f" x1="382" y1="42" x2="392" y2="25" stroke="var(--pu)" stroke-width="2" stroke-linecap="round" opacity="0.6"/><circle cx="392" cy="25" r="4" fill="var(--pu)" opacity="0.9"/><text x="398" y="20" fill="var(--pu)" font-size="9" font-family="JetBrains Mono" font-weight="600">FR</text></g>
-                <g id="leg-rl"><line id="rl-s" x1="190" y1="170" x2="148" y2="215" stroke="var(--gn)" stroke-width="3.5" stroke-linecap="round"/><line id="rl-k" x1="148" y1="215" x2="118" y2="255" stroke="var(--gn)" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/><line id="rl-f" x1="118" y1="255" x2="108" y2="270" stroke="var(--gn)" stroke-width="2" stroke-linecap="round" opacity="0.6"/><circle cx="108" cy="270" r="4" fill="var(--gn)" opacity="0.9"/><text x="95" y="276" fill="var(--gn)" font-size="9" font-family="JetBrains Mono" font-weight="600">RL</text></g>
-                <g id="leg-rr"><line id="rr-s" x1="310" y1="170" x2="352" y2="215" stroke="var(--or)" stroke-width="3.5" stroke-linecap="round"/><line id="rr-k" x1="352" y1="215" x2="382" y2="255" stroke="var(--or)" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/><line id="rr-f" x1="382" y1="255" x2="392" y2="270" stroke="var(--or)" stroke-width="2" stroke-linecap="round" opacity="0.6"/><circle cx="392" cy="270" r="4" fill="var(--or)" opacity="0.9"/><text x="398" y="276" fill="var(--or)" font-size="9" font-family="JetBrains Mono" font-weight="600">RR</text></g>
-                <g opacity="0.6"><circle cx="190" cy="130" r="3" fill="var(--bg0)" stroke="var(--ac)" stroke-width="1"/><circle cx="310" cy="130" r="3" fill="var(--bg0)" stroke="var(--pu)" stroke-width="1"/><circle cx="190" cy="170" r="3" fill="var(--bg0)" stroke="var(--gn)" stroke-width="1"/><circle cx="310" cy="170" r="3" fill="var(--bg0)" stroke="var(--or)" stroke-width="1"/></g>
-              </svg>
-            </div>
-            <div class="quad-stats">
-              <div class="qstat"><div class="qstat-label">Pitch</div><div class="qstat-value" id="q-pitch">0.0<span class="qstat-unit">deg</span></div></div>
-              <div class="qstat"><div class="qstat-label">Roll</div><div class="qstat-value" id="q-roll">0.0<span class="qstat-unit">deg</span></div></div>
-              <div class="qstat"><div class="qstat-label">Height</div><div class="qstat-value" id="q-height">--<span class="qstat-unit">mm</span></div></div>
-              <div class="qstat"><div class="qstat-label">Voltage</div><div class="qstat-value" id="q-voltage">--<span class="qstat-unit">V</span></div></div>
-              <div class="qstat"><div class="qstat-label">Current</div><div class="qstat-value" id="q-current">--<span class="qstat-unit">mA</span></div></div>
-              <div class="qstat"><div class="qstat-label">GPS</div><div class="qstat-value" id="q-gps">--<span class="qstat-unit"></span></div></div>
-            </div>
+
+  <!-- MAIN -->
+  <div class="main-area">
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+      <div class="panel-header"><span class="title">Explorer</span></div>
+      <div class="explorer-search"><input placeholder="Filter workspace" id="explorer-filter"></div>
+      <div style="flex:1;overflow-y:auto" id="explorer-tree"></div>
+    </div>
+
+    <!-- CENTER -->
+    <div class="center">
+      <div class="twin-container">
+        <!-- Digital Twin Viewport -->
+        <div class="twin-viewport">
+          <div class="grid-field"></div>
+          <div class="twin-overlay">Digital Twin &middot; perspective &middot; solid</div>
+          <div class="twin-hud" id="twin-hud">
+            <div>v — m/s</div>
+            <div>pitch —&deg;</div>
+            <div>roll —&deg; &middot; yaw —&deg;</div>
+            <div>contacts —/4</div>
+            <div>/joint_states — Hz</div>
+          </div>
+          <svg viewBox="0 0 420 240" xmlns="http://www.w3.org/2000/svg" id="robot-svg">
+            <defs>
+              <linearGradient id="body-grad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="oklch(0.42 0.006 260)"/>
+                <stop offset="100%" stop-color="oklch(0.26 0.005 260)"/>
+              </linearGradient>
+            </defs>
+            <ellipse cx="210" cy="205" rx="120" ry="10" fill="oklch(0 0 0 / 40%)"/>
+            <g stroke="oklch(0.55 0.02 220)" stroke-width="4" fill="none" stroke-linecap="round">
+              <path d="M120 130 L104 168 L118 196"/>
+              <path d="M150 132 L138 170 L152 197"/>
+              <path d="M272 132 L288 170 L272 197"/>
+              <path d="M300 130 L316 168 L302 196"/>
+            </g>
+            <rect x="118" y="96" width="184" height="40" rx="12" fill="url(#body-grad)"/>
+            <rect x="118" y="96" width="184" height="40" rx="12" fill="none" stroke="oklch(0.5 0.01 260)"/>
+            <rect x="296" y="86" width="44" height="34" rx="8" fill="url(#body-grad)"/>
+            <rect x="296" y="86" width="44" height="34" rx="8" fill="none" stroke="oklch(0.5 0.01 260)"/>
+            <circle cx="332" cy="100" r="5" fill="var(--signal)"/>
+            <circle cx="332" cy="100" r="10" fill="none" stroke="oklch(0.82 0.115 200 / 30%)"/>
+            <rect x="150" y="80" width="60" height="12" rx="4" fill="oklch(0.3 0.005 260)"/>
+            <g fill="var(--signal)">
+              <circle cx="120" cy="131" r="3"/><circle cx="150" cy="131" r="3"/><circle cx="272" cy="131" r="3"/><circle cx="300" cy="131" r="3"/>
+            </g>
+            <g stroke="oklch(0.82 0.115 200 / 35%)" stroke-dasharray="3 5" fill="none">
+              <path d="M332 100 L410 60"/><path d="M332 100 L410 140"/>
+            </g>
+          </svg>
+          <div class="twin-chips">
+            <span class="chip active">Perspective</span><span class="chip">Front</span><span class="chip">Top</span>
+            <span class="sep"></span>
+            <span class="chip active">solid</span><span class="chip">wireframe</span><span class="chip">xray</span>
+          </div>
+          <div class="gauge">
+            <svg viewBox="0 0 100 100" id="attitude-gauge">
+              <circle cx="50" cy="50" r="44" fill="none" stroke="oklch(0.35 0.005 260)"/>
+              <circle cx="50" cy="50" r="30" fill="none" stroke="oklch(0.3 0.005 260)" stroke-dasharray="2 4"/>
+              <g id="horizon-line"><line x1="14" y1="50" x2="86" y2="50" stroke="var(--signal)" stroke-width="1.4"/></g>
+              <g id="heading-arrow"><path d="M50 12 L54 22 L46 22 Z" fill="var(--ok)"/></g>
+              <circle cx="50" cy="50" r="2" fill="oklch(0.9 0 0)"/>
+            </svg>
+            <div class="gauge-label">IMU attitude</div>
           </div>
         </div>
-        <div class="card" style="margin-top:12px">
-          <div class="card-head">
-            <span class="card-title">Joint Control</span>
-            <div class="btn-group"><button class="btn accent sm" onclick="centerAll()">Center All</button><button class="btn red sm" onclick="relaxAll()">Relax</button></div>
-          </div>
-          <div class="card-body"><div class="joints-grid" id="joints-grid"></div></div>
-        </div>
-      </div>
-      <div class="viz-right">
-        <div class="card">
-          <div class="card-head"><span class="card-title">Sensors</span><span class="card-tag">1 Hz</span></div>
-          <div class="card-body" style="padding:4px 14px">
-            <div class="sensor-row"><div><div class="sr-name">MPU6050</div><div class="sr-sub">IMU 6-axis</div></div><div style="text-align:right"><div class="sr-val" id="s-ax">--</div><div class="sr-sub" id="s-mpu-detail">ax ay az</div></div></div>
-            <div class="sensor-row"><div><div class="sr-name">VL53L0X</div><div class="sr-sub">Laser ToF</div></div><div style="text-align:right"><div class="sr-val" id="s-vl">--<span class="sr-unit">mm</span></div><div class="sr-status off" id="s-vl-status">waiting</div></div></div>
-            <div class="sensor-row"><div><div class="sr-name">INA219</div><div class="sr-sub">Power</div></div><div style="text-align:right"><div class="sr-val" id="s-v">--<span class="sr-unit">V</span></div><div class="sr-sub"><span id="s-ma">--</span> mA</div></div></div>
-            <div class="sensor-row"><div><div class="sr-name">NEO-6M</div><div class="sr-sub">GPS</div></div><div style="text-align:right"><div class="sr-val" id="s-gps">--</div><div class="sr-status off" id="s-gps-status">no fix</div></div></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-head"><span class="card-title">System</span></div>
-          <div class="card-body" style="padding:4px 14px">
-            <div class="sys-row"><span class="sys-label">Firmware</span><span class="sys-val" id="sys-fw">--</span></div>
-            <div class="sys-row"><span class="sys-label">Uptime</span><span class="sys-val" id="sys-uptime">--</span></div>
-            <div class="sys-row"><span class="sys-label">I2C0</span><span class="sys-val" id="sys-i2c0">--</span></div>
-            <div class="sys-row"><span class="sys-label">I2C1</span><span class="sys-val" id="sys-i2c1">--</span></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-head"><span class="card-title">TFT Display</span><span class="card-tag">240x320</span></div>
-          <div class="card-body">
-            <div style="display:flex;gap:6px;align-items:center">
-              <input type="color" id="tft-color" value="#38bdf8" style="width:28px;height:24px;border:1px solid var(--bd);border-radius:3px;cursor:pointer;background:none">
-              <button class="btn accent sm" onclick="tftFill()">Fill</button>
-              <button class="btn sm" onclick="tftClear()">Clear</button>
-              <button class="btn sm" onclick="tftShowImage()">Image</button>
-            </div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-head"><span class="card-title">Actions</span></div>
-          <div class="card-body">
-            <div class="btn-group" style="flex-direction:column;gap:6px">
-              <div style="display:flex;gap:4px"><button class="btn sm" onclick="sendCmd({cmd:'scan'})">Scan</button><button class="btn sm" onclick="sendCmd({cmd:'status'})">Status</button><button class="btn green sm" onclick="runDeploy()">Deploy</button></div>
-              <div style="display:flex;gap:4px"><button class="btn sm" onclick="sendCmd({cmd:'led',on:true})">LED+</button><button class="btn sm" onclick="sendCmd({cmd:'led',on:false})">LED-</button></div>
-            </div>
+
+        <!-- Joint Panel -->
+        <div class="joint-panel">
+          <div class="panel-header"><span class="title">Joint States</span><span class="right" style="font-family:'JetBrains Mono',monospace;font-size:10px;color:oklch(0.66 0.006 260)">/joint_states</span></div>
+          <div class="joint-list" id="joint-list"></div>
+          <div class="joint-footer" id="joint-footer">
+            <div class="meta"><span>— &middot; 60 samples</span><span>load —%</span></div>
+            <svg viewBox="0 0 100 28" preserveAspectRatio="none" style="width:100%;height:24px;margin-top:6px" id="sparkline-svg"><polyline points="" fill="none" stroke="oklch(0.82 0.115 200 / 0.7)" stroke-width="1" vector-effect="non-scaling-stroke"/></svg>
           </div>
         </div>
       </div>
     </div>
-    <div class="bottom-panel">
-      <div class="bottom-tabs"><div class="btab active">Log</div></div>
-      <div class="log-content" id="log-box"></div>
-      <div class="cmd-input-row">
-        <span style="color:var(--t4);font-family:'JetBrains Mono',monospace;font-size:11px;line-height:24px">$</span>
-        <input class="cmd-input" id="cmd-input" placeholder='{"cmd":"sensors"}' onkeydown="if(event.key==='Enter')sendRawCmd()">
-        <button class="btn accent sm" onclick="sendRawCmd()">Send</button>
+
+    <!-- INSPECTOR -->
+    <div class="inspector">
+      <div class="panel-header">
+        <span class="title">Inspector</span>
+        <div class="right"><span class="chip active">Props</span><span class="chip">Wiring</span></div>
+      </div>
+      <div style="flex:1;overflow-y:auto" id="inspector-body">
+        <div class="inspector-section">
+          <div class="inspector-section-head">State</div>
+          <div id="inspector-state"></div>
+        </div>
+        <div class="inspector-section">
+          <div class="inspector-section-head">Sensors</div>
+          <div id="inspector-sensors"></div>
+        </div>
+        <div class="inspector-section">
+          <div class="inspector-section-head">AI Operations</div>
+          <div id="inspector-ai"></div>
+        </div>
       </div>
     </div>
   </div>
+
+  <!-- TERMINAL -->
+  <div class="terminal-dock" id="terminal-dock">
+    <div class="terminal-tabs">
+      <button class="terminal-tab active" data-tab="sensors">sensors</button>
+      <button class="terminal-tab" data-tab="commands">commands</button>
+      <button class="terminal-tab" data-tab="log">log</button>
+    </div>
+    <div class="terminal-body" id="terminal-body"></div>
+  </div>
+
+  <!-- STATUS BAR -->
+  <div class="statusbar">
+    <span class="preset"><span class="dot signal"></span> SIPHER</span>
+    <span class="dot ok"></span> <span id="sb-pico">Pico online</span>
+    <span class="sep"></span>
+    <span>loop <b id="sb-loop">—</b> Hz</span>
+    <span class="sep"></span>
+    <span>batt <b id="sb-batt">—</b></span>
+    <span>core <b id="sb-core">—</b></span>
+    <span>motor <b id="sb-motor">—</b></span>
+    <span class="sep"></span>
+    <span>mission <b id="sb-mission">idle</b></span>
+    <span class="right">
+      <span id="sb-pitch" class="warn-text">pitch —&deg;</span>
+      <span id="sb-time">—</span>
+      <span>&Xi;K commands</span>
+    </span>
+  </div>
 </div>
+
 <script>
-const API=window.location.origin;
-let connected=false,joints={};
-const JOINTS=[
-  ['fl_hip','Hip',90,'FL'],['fl_thigh','Thigh',90,'FL'],['fl_calf','Calf',90,'FL'],
-  ['fr_hip','Hip',90,'FR'],['fr_thigh','Thigh',90,'FR'],['fr_calf','Calf',90,'FR'],
-  ['rl_hip','Hip',90,'RL'],['rl_thigh','Thigh',90,'RL'],['rl_calf','Calf',90,'RL'],
-  ['rr_hip','Hip',90,'RR'],['rr_thigh','Thigh',90,'RR'],['rr_calf','Calf',90,'RR'],
+// ============ CONFIG ============
+const API = window.location.origin;
+const POLL_MS = 1000;
+
+// ============ STATE ============
+let connected = false;
+let sensors = {};
+let joints = {};
+let logLines = [];
+
+const JOINT_DEFS = [
+  {name:'FL_hip',label:'FL hip',group:'FL',default:90},
+  {name:'FL_thigh',label:'FL thigh',group:'FL',default:90},
+  {name:'FL_calf',label:'FL calf',group:'FL',default:90},
+  {name:'FR_hip',label:'FR hip',group:'FR',default:90},
+  {name:'FR_thigh',label:'FR thigh',group:'FR',default:90},
+  {name:'FR_calf',label:'FR calf',group:'FR',default:90},
+  {name:'RL_hip',label:'RL hip',group:'RL',default:90},
+  {name:'RL_thigh',label:'RL thigh',group:'RL',default:90},
+  {name:'RL_calf',label:'RL calf',group:'RL',default:90},
+  {name:'RR_hip',label:'RR hip',group:'RR',default:90},
+  {name:'RR_thigh',label:'RR thigh',group:'RR',default:90},
+  {name:'RR_calf',label:'RR calf',group:'RR',default:90},
 ];
-function initJoints(){
-  const g=document.getElementById('joints-grid'),gr={};
-  JOINTS.forEach(([n,l,d,c])=>{
-    joints[n]=d;
-    if(!gr[c]){gr[c]=document.createElement('div');gr[c].className='leg-group';gr[c].innerHTML='<div class="leg-title '+c.toLowerCase()+'">'+c+'</div>';g.appendChild(gr[c])}
-    const r=document.createElement('div');r.className='jrow';
-    r.innerHTML='<span class="jlbl">'+l+'</span><input type="range" class="jslider" id="j-'+n+'" min="0" max="180" value="'+d+'" oninput="onJ(\''+n+'\',this.value)"><span class="jval" id="jv-'+n+'">'+d+'</span>';
-    gr[c].appendChild(r);
+
+const EXPLORER = [
+  {id:'hw',label:'Hardware',children:[
+    {id:'hw-pico',label:'Pico 2 W',meta:'online',tone:'ok'},
+    {id:'hw-mpu',label:'MPU6050',meta:'0x68 I2C1',tone:'ok'},
+    {id:'hw-pca',label:'PCA9685',meta:'0x40 I2C0',tone:'ok'},
+    {id:'hw-ina',label:'INA219',meta:'0x41 I2C0',tone:'ok'},
+    {id:'hw-vl',label:'VL53L0X',meta:'0x29 I2C0',tone:'ok'},
+    {id:'hw-gps',label:'GPS NEO-6M',meta:'UART GP0/1',tone:'muted'},
+  ]},
+  {id:'periph',label:'Peripherals',children:[
+    {id:'p-tft',label:'ILI9341 TFT',meta:'SPI0 240x320',tone:'ok'},
+    {id:'p-nrf',label:'nRF24L01+',meta:'SPI0 CSN:GP20',tone:'muted'},
+  ]},
+  {id:'joints',label:'Joints (12 DoF)',children:[
+    {id:'j-fl',label:'FL leg',meta:'3 joints',tone:'signal'},
+    {id:'j-fr',label:'FR leg',meta:'3 joints',tone:'signal'},
+    {id:'j-rl',label:'RL leg',meta:'3 joints',tone:'signal'},
+    {id:'j-rr',label:'RR leg',meta:'3 joints',tone:'signal'},
+  ]},
+  {id:'missions',label:'Missions',children:[
+    {id:'m-calibrate',label:'calibrate.servo',meta:'ready'},
+    {id:'m-walk',label:'walk_test.mission',meta:'queued'},
+    {id:'m-sweep',label:'sensor_sweep.mission',meta:'queued'},
+  ]},
+];
+
+const TERMINALS = {
+  sensors: [],
+  commands: [{c:'muted',text:'$ {\"cmd\":\"sensors\"}'},{c:'signal',text:'waiting for data...'}],
+  log: []
+};
+
+let selectedJoint = 0;
+
+// ============ INIT ============
+function init() {
+  initExplorer();
+  initJointList();
+  initTerminalTabs();
+  poll();
+  setInterval(poll, POLL_MS);
+  setInterval(updateClock, 1000);
+  updateClock();
+}
+
+function initExplorer() {
+  const container = document.getElementById('explorer-tree');
+  container.innerHTML = '';
+  EXPLORER.forEach(group => {
+    const hdr = document.createElement('div');
+    hdr.className = 'tree-group-header';
+    hdr.innerHTML = `<span class="chevron">&#9660;</span><span class="label">${group.label}</span><span class="count">${group.children.length}</span>`;
+    const kids = document.createElement('div');
+    group.children.forEach(child => {
+      const item = document.createElement('div');
+      item.className = 'tree-item';
+      item.innerHTML = `<span class="dot ${child.tone||'muted'}"></span><span class="tree-label">${child.label}</span><span class="tree-meta">${child.meta||''}</span>`;
+      kids.appendChild(item);
+    });
+    hdr.addEventListener('click', () => {
+      const open = kids.style.display !== 'none';
+      kids.style.display = open ? 'none' : '';
+      hdr.querySelector('.chevron').innerHTML = open ? '&#9654;' : '&#9660;';
+    });
+    container.appendChild(hdr);
+    container.appendChild(kids);
   });
 }
-function onJ(n,v){joints[n]=+v;document.getElementById('jv-'+n).textContent=v;updateQuad();clearTimeout(onJ._t);onJ._t=setTimeout(sendServos,80)}
-function sendServos(){sendCmd({cmd:'servos',positions:JOINTS.map(([n])=>joints[n])})}
-function centerAll(){JOINTS.forEach(([n])=>{joints[n]=90;document.getElementById('j-'+n).value=90;document.getElementById('jv-'+n).textContent='90'});updateQuad();sendServos()}
-function relaxAll(){JOINTS.forEach(([n])=>{joints[n]=0;document.getElementById('j-'+n).value=0;document.getElementById('jv-'+n).textContent='0'});updateQuad();sendServos()}
-function updateQuad(){
-  const r=d=>d*Math.PI/180,S=42,C=38;
-  ['fl','fr','rl','rr'].forEach(leg=>{
-    const f=leg[0]==='f',l=leg[1]==='l';
-    const hip=r(joints[leg+'_hip']-90),th=r(joints[leg+'_thigh']-90),ca=r(joints[leg+'_calf']-90);
-    const dir=f?-1:1,side=l?-1:1;
-    const bx=l?190:310,by=f?130:170;
-    const hx=bx+side*18*Math.cos(hip),hy=by+dir*18*Math.sin(hip);
-    const tx=hx+side*S*Math.cos(th),ty=hy+dir*S*Math.sin(th);
-    const total=th+ca,cx=tx+side*C*Math.cos(total),cy=ty+dir*C*Math.sin(total);
-    const set=(id,x1,y1,x2,y2)=>{const e=document.getElementById(id);if(e){e.setAttribute('x1',x1);e.setAttribute('y1',y1);e.setAttribute('x2',x2);e.setAttribute('y2',y2)}};
-    set(leg+'-s',bx,by,Math.round(hx),Math.round(hy));
-    set(leg+'-k',Math.round(hx),Math.round(hy),Math.round(tx),Math.round(ty));
-    set(leg+'-f',Math.round(tx),Math.round(ty),Math.round(cx),Math.round(cy));
+
+function initJointList() {
+  const list = document.getElementById('joint-list');
+  list.innerHTML = '';
+  JOINT_DEFS.forEach((j, i) => {
+    joints[j.name] = j.default;
+    const btn = document.createElement('button');
+    btn.className = 'joint-item' + (i === 0 ? ' active' : '');
+    btn.id = 'ji-' + j.name;
+    btn.innerHTML = `
+      <div style="display:flex;justify-content:space-between"><span class="joint-name">${j.label}</span><span class="joint-deg" id="jd-${j.name}">${j.default}&deg;</span></div>
+      <div class="joint-bar"><div class="joint-bar-fill ok" id="jb-${j.name}" style="width:${j.default/180*100}%"></div></div>`;
+    btn.addEventListener('click', () => selectJoint(i));
+    list.appendChild(btn);
   });
 }
-function updateSensors(d){
-  if(d.mpu){const[ax,ay,az,gx,gy,gz]=d.mpu;const mg=v=>Math.round(v/16384*1000);
-    document.getElementById('s-ax').innerHTML=mg(ax)+'<span class="sr-unit">mg</span>';
-    document.getElementById('s-mpu-detail').textContent='ax '+mg(ay)+' ay '+mg(az)+' az';
-    const p=Math.atan2(ay,Math.sqrt(ax*ax+az*az))*180/Math.PI;
-    const rl=Math.atan2(-ax,Math.sqrt(ay*ay+az*az))*180/Math.PI;
-    document.getElementById('q-pitch').innerHTML=p.toFixed(1)+'<span class="qstat-unit">deg</span>';
-    document.getElementById('q-roll').innerHTML=rl.toFixed(1)+'<span class="qstat-unit">deg</span>';
-  }
-  if(d.vl53_mm!=null){document.getElementById('s-vl').innerHTML=d.vl53_mm+'<span class="sr-unit">mm</span>';
-    const s=document.getElementById('s-vl-status');s.textContent=d.vl53_mm<200?'close':'ok';s.className='sr-status '+(d.vl53_mm<200?'warn':'ok');
-    document.getElementById('q-height').innerHTML=d.vl53_mm+'<span class="qstat-unit">mm</span>';
-  }
-  if(d.ina){const v=d.ina.voltage_v??d.ina.bus_v,ma=d.ina.current_ma??d.ina.current_ma_est;
-    document.getElementById('s-v').innerHTML=(v!=null?v:'--')+'<span class="sr-unit">V</span>';
-    document.getElementById('s-ma').textContent=ma!=null?ma:'--';
-    document.getElementById('q-voltage').innerHTML=(v!=null?v:'--')+'<span class="qstat-unit">V</span>';
-    document.getElementById('q-current').innerHTML=(ma!=null?ma:'--')+'<span class="qstat-unit">mA</span>';
-  }
-  if(d.gps){if(d.gps.lat!=null){document.getElementById('s-gps').textContent=d.gps.lat.toFixed(4);
-    const s=document.getElementById('s-gps-status');s.textContent=d.gps.fix?'fix':'no fix';s.className='sr-status '+(d.gps.fix?'ok':'off');
-    document.getElementById('q-gps').innerHTML=d.gps.lat.toFixed(2)+'<span class="qstat-unit"></span>';
-  }else if(d.gps.raw){document.getElementById('s-gps').textContent=d.gps.raw.substring(0,14)}}
-  if(d.i2c0){document.getElementById('sys-i2c0').textContent=d.i2c0.map(h=>h.toUpperCase()).join(' ')||'none';document.getElementById('sb-i2c0').textContent=d.i2c0.length+' devs'}
-  if(d.i2c1){document.getElementById('sys-i2c1').textContent=d.i2c1.map(h=>h.toUpperCase()).join(' ')||'none';document.getElementById('sb-i2c1').textContent=d.i2c1.length+' devs'}
-  if(d.version){document.getElementById('sys-fw').textContent=d.version;document.getElementById('sb-fw').textContent=d.version}
+
+function selectJoint(idx) {
+  document.querySelectorAll('.joint-item').forEach((el,i) => el.classList.toggle('active', i===idx));
+  selectedJoint = idx;
+  updateJointFooter();
 }
-function sendCmd(p){return fetch(API+'/api/bridge_cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}).then(r=>r.json()).then(d=>{addLog('cmd',JSON.stringify(p).substring(0,80),'cmd');return d}).catch(e=>addLog('err',e.message,'err'))}
-function tftFill(){const h=document.getElementById('tft-color').value,r=parseInt(h.slice(1,3),16),g=parseInt(h.slice(3,5),16),b=parseInt(h.slice(5,7),16);sendCmd({cmd:'fill_color',color:((r>>3)<<11)|((g>>2)<<5)|(b>>3)})}
-function tftClear(){sendCmd({cmd:'fill_color',color:0})}
-function tftShowImage(){sendCmd({cmd:'show_image'})}
-function runDeploy(){addLog('deploy','git pull...','cmd');fetch(API+'/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:'cd /home/sipher/sipher && git pull origin main'})}).then(r=>r.json()).then(d=>{addLog('deploy',d.rc===0?'OK':'FAIL',d.rc===0?'ok':'err')}).catch(e=>addLog('err',e.message,'err'))}
-function sendRawCmd(){const i=document.getElementById('cmd-input'),v=i.value.trim();if(!v)return;i.value='';try{sendCmd(JSON.parse(v))}catch(e){addLog('err','bad JSON: '+e.message,'err')}}
-function poll(){const t0=performance.now();fetch(API+'/api/sensors').then(r=>r.json()).then(d=>{connected=true;document.getElementById('latency').textContent=Math.round(performance.now()-t0);updateSensors(d)}).catch(()=>{connected=false});
-  const dot=document.getElementById('conn-dot'),txt=document.getElementById('conn-text');
-  dot.className=connected?'dot on':'dot off';txt.textContent=connected?'connected':'disconnected';
+
+function updateJointFooter() {
+  const j = JOINT_DEFS[selectedJoint];
+  const val = joints[j.name] || 90;
+  const load = Math.min(100, val / 180 * 100);
+  document.querySelector('#joint-footer .meta').innerHTML = `<span>${j.name} &middot; 60 samples</span><span>load ${Math.round(load)}%</span>`;
+  updateSparkline(load);
 }
-function pollInfo(){fetch(API+'/api/info').then(r=>r.json()).then(d=>{document.getElementById('pi-ip').textContent=d.pi_ip||location.hostname;document.getElementById('uptime').textContent=d.uptime?Math.round(d.uptime)+'s':'--'}).catch(()=>{})}
-function addLog(src,msg,cls){const b=document.getElementById('log-box'),ts=new Date().toLocaleTimeString('en-GB',{hour12:false});b.innerHTML+='<div><span class="ts">'+ts+'</span> <span class="'+(cls||'')+'">['+src+']</span> '+msg+'</div>';b.scrollTop=b.scrollHeight;while(b.children.length>50)b.removeChild(b.firstChild)}
-initJoints();updateQuad();pollInfo();setInterval(poll,1000);poll();setInterval(pollInfo,10000);addLog('boot','Sipher Mission Control ready','ok');
+
+function updateSparkline(load) {
+  const svg = document.getElementById('sparkline-svg');
+  const pts = [];
+  for (let i = 0; i < 20; i++) pts.push(`${i*5},${28 - (load/100*24 + Math.sin(i*0.5)*4)}`);
+  svg.querySelector('polyline').setAttribute('points', pts.join(' '));
+}
+
+// ============ TERMINAL TABS ============
+function initTerminalTabs() {
+  document.querySelectorAll('.terminal-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.terminal-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      renderTerminal(tab.dataset.tab);
+    });
+  });
+}
+
+function renderTerminal(id) {
+  const body = document.getElementById('terminal-body');
+  const lines = TERMINALS[id] || [];
+  body.innerHTML = lines.map(l => `<div class="${l.c}">${esc(l.text)}</div>`).join('') + '<div class="fg">$ _</div>';
+  body.scrollTop = body.scrollHeight;
+}
+
+function addTerminalLine(tab, text, cls) {
+  TERMINALS[tab].push({c: cls || 'fg', text});
+  if (TERMINALS[tab].length > 100) TERMINALS[tab].shift();
+  const activeTab = document.querySelector('.terminal-tab.active');
+  if (activeTab && activeTab.dataset.tab === tab) renderTerminal(tab);
+}
+
+function esc(s) { return s.replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ============ POLLING ============
+function poll() {
+  const t0 = performance.now();
+  fetch(API + '/api/sensors')
+    .then(r => r.json())
+    .then(d => {
+      connected = true;
+      sensors = d;
+      const ms = Math.round(performance.now() - t0);
+      document.getElementById('link-ms').textContent = ms;
+      document.getElementById('pico-status').textContent = 'online';
+      updateAll(d);
+    })
+    .catch(() => {
+      connected = false;
+      document.getElementById('pico-status').textContent = 'offline';
+    });
+}
+
+function updateAll(d) {
+  updateTwinHud(d);
+  updateInspectorState(d);
+  updateInspectorSensors(d);
+  updateStatusBar(d);
+  updateSensorsTerminal(d);
+}
+
+function updateTwinHud(d) {
+  const el = document.getElementById('twin-hud');
+  let pitch = 0, roll = 0, contacts = 4, loopHz = 0;
+  if (d.mpu) {
+    const [ax,ay,az] = d.mpu;
+    pitch = Math.atan2(ay, Math.sqrt(ax*ax+az*az))*180/Math.PI;
+    roll = Math.atan2(-ax, Math.sqrt(ay*ay+az*az))*180/Math.PI;
+  }
+  if (d.vl53_mm != null) contacts = d.vl53_mm < 500 ? 4 : 3;
+  loopHz = d.uptime_s ? Math.round(1000/POLL_MS) : 0;
+  el.innerHTML = `
+    <div>v — m/s</div>
+    <div class="${pitch>18?'warn':''}">pitch ${pitch.toFixed(1)}&deg;</div>
+    <div>roll ${roll.toFixed(1)}&deg; &middot; yaw —&deg;</div>
+    <div>contacts ${contacts}/4</div>
+    <div>/joint_states ${loopHz} Hz</div>`;
+  // Update attitude gauge
+  const hl = document.getElementById('horizon-line');
+  if (hl) hl.setAttribute('transform', `rotate(${roll*3} 50 50) translate(0 ${pitch-18})`);
+}
+
+function updateInspectorState(d) {
+  const el = document.getElementById('inspector-state');
+  let voltage = '—', current = '—', temp = '—', height = '—';
+  if (d.ina) { voltage = d.ina.voltage_v ?? '—'; current = d.ina.current_ma ?? '—'; }
+  if (d.vl53_mm != null) height = d.vl53_mm + ' mm';
+  el.innerHTML = [
+    f('Mode','AUTONOMOUS','var(--signal)'),
+    f('Gait','idle'),
+    f('Velocity','0.00 m/s'),
+    f('Battery',voltage+' V',voltage<5?'var(--warn)':''),
+    f('Bus voltage',voltage+' V'),
+    f('Temp (core)',temp+' °C'),
+    f('Height',height),
+    f('Pitch',(() => { if(!d.mpu)return '— deg'; const[ax,ay,az]=d.mpu; return (Math.atan2(ay,Math.sqrt(ax*ax+az*az))*180/Math.PI).toFixed(1)+'°'; })()),
+  ].join('');
+}
+
+function updateInspectorSensors(d) {
+  const el = document.getElementById('inspector-sensors');
+  let items = [];
+  if (d.mpu) {
+    const mg = v => Math.round(v/16384*1000);
+    items.push(f('IMU AX', mg(d.mpu[0])+' mg'));
+    items.push(f('IMU AY', mg(d.mpu[1])+' mg'));
+    items.push(f('IMU AZ', mg(d.mpu[2])+' mg'));
+  }
+  if (d.vl53_mm != null) items.push(f('ToF distance', d.vl53_mm+' mm'));
+  if (d.ina) {
+    items.push(f('Bus voltage', (d.ina.voltage_v ?? '—')+' V'));
+    items.push(f('Current', (d.ina.current_ma ?? '—')+' mA'));
+  }
+  if (d.gps && d.gps.lat != null) {
+    items.push(f('GPS lat', d.gps.lat));
+    items.push(f('GPS lon', d.gps.lon));
+  }
+  if (d.i2c0) items.push(f('I2C0', d.i2c0.join(' ')));
+  if (d.i2c1) items.push(f('I2C1', d.i2c1.join(' ')));
+  el.innerHTML = items.join('');
+}
+
+function f(label, value, tone) {
+  return `<div class="field"><span class="label">${label}</span><span class="value" ${tone?'style="color:'+tone+'"':''}>${value}</span></div>`;
+}
+
+function updateStatusBar(d) {
+  if (d.vl53_mm != null) document.getElementById('sb-mission').textContent = d.vl53_mm+' mm';
+  if (d.ina) {
+    document.getElementById('sb-batt').textContent = (d.ina.voltage_v ?? '—')+'V';
+    document.getElementById('sb-core').textContent = (d.ina.current_ma ?? '—')+'mA';
+  }
+  if (d.mpu) {
+    const [ax,ay,az] = d.mpu;
+    const pitch = Math.atan2(ay,Math.sqrt(ax*ax+az*az))*180/Math.PI;
+    document.getElementById('sb-pitch').textContent = 'pitch '+pitch.toFixed(1)+'°';
+    document.getElementById('sb-pitch').className = pitch > 18 ? 'warn-text' : '';
+  }
+  document.getElementById('sb-loop').textContent = '1';
+  document.getElementById('robot-info').textContent = `sipher &middot; fw ${d.version||'—'} &middot; pi ${location.hostname}`;
+}
+
+function updateSensorsTerminal(d) {
+  TERMINALS.sensors = [];
+  if (d.mpu) {
+    const mg = v => Math.round(v/16384*1000);
+    TERMINALS.sensors.push({c:'muted',text:'> MPU6050 (I2C1 @ 0x68)'});
+    TERMINALS.sensors.push({c:'fg',text:`  accel: ax=${mg(d.mpu[0])} ay=${mg(d.mpu[1])} az=${mg(d.mpu[2])} mg`});
+    TERMINALS.sensors.push({c:'fg',text:`  gyro:  gx=${d.mpu[3]} gy=${d.mpu[4]} gz=${d.mpu[5]} dps`});
+  }
+  if (d.vl53_mm != null) {
+    TERMINALS.sensors.push({c:'muted',text:'> VL53L0X (I2C0 @ 0x29)'});
+    TERMINALS.sensors.push({c:'fg',text:`  range: ${d.vl53_mm} mm ${d.vl53_mm<200?'[CLOSE]':'[OK]'}`});
+  }
+  if (d.ina) {
+    TERMINALS.sensors.push({c:'muted',text:'> INA219 (I2C0 @ 0x41)'});
+    TERMINALS.sensors.push({c:'fg',text:`  voltage: ${d.ina.voltage_v ?? '—'} V  current: ${d.ina.current_ma ?? '—'} mA`});
+  }
+  if (d.gps) {
+    TERMINALS.sensors.push({c:'muted',text:'> NEO-6M GPS (UART)'});
+    if (d.gps.lat != null) TERMINALS.sensors.push({c:'ok',text:`  fix: ${d.gps.lat}, ${d.gps.lon}`});
+    else if (d.gps.raw) TERMINALS.sensors.push({c:'fg',text:`  raw: ${d.gps.raw.substring(0,40)}`});
+    else TERMINALS.sensors.push({c:'muted',text:'  no data'});
+  }
+  if (d.i2c0) TERMINALS.sensors.push({c:'muted',text:`> I2C0 scan: ${d.i2c0.join(' ')||'none'}`});
+  if (d.i2c1) TERMINALS.sensors.push({c:'muted',text:`> I2C1 scan: ${d.i2c1.join(' ')||'none'}`});
+  const activeTab = document.querySelector('.terminal-tab.active');
+  if (activeTab && activeTab.dataset.tab === 'sensors') renderTerminal('sensors');
+}
+
+function updateClock() {
+  document.getElementById('sb-time').textContent = new Date().toLocaleTimeString('en-GB',{hour12:false}) + ' UTC';
+}
+
+// ============ JOINT CONTROL ============
+function sendCmd(payload) {
+  fetch(API + '/api/bridge_cmd', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  }).then(r => r.json()).then(d => {
+    addTerminalLine('commands', JSON.stringify(payload).substring(0,80), 'signal');
+    addTerminalLine('commands', JSON.stringify(d).substring(0,120), 'ok');
+  }).catch(e => addTerminalLine('commands', 'error: '+e.message, 'danger'));
+}
+
+// Expose for inline handlers
+window.sendCmd = sendCmd;
 </script>
 </body>
 </html>
