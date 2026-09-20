@@ -42,31 +42,55 @@ _sensor_lock = threading.Lock()
 _clients = []  # TCP client sockets
 _clients_lock = threading.Lock()
 _stdin_buf = b""
+_serial = None  # shared serial connection
+_serial_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Serial reader — read JSON lines from Pico
 # ---------------------------------------------------------------------------
 def read_pico():
     """Continuously read JSON lines from Pico serial port."""
-    global _stdin_buf
+    global _stdin_buf, _latest_sensor, _serial
+    while True:
+        try:
+            _serial = serial.Serial(PICO_SERIAL, PICO_BAUD, timeout=2)
+            print(f"[bridge] connected to {PICO_SERIAL}@{PICO_BAUD}", flush=True)
+            break
+        except Exception as e:
+            print(f"[bridge] ERROR opening {PICO_SERIAL}: {e}, retrying...", flush=True)
+            time.sleep(3)
+
+    # Drain boot noise
+    time.sleep(2)
+    with _serial_lock:
+        _serial.reset_input_buffer()
+
+    # Enable dashboard mode on Pico
     try:
-        ser = serial.Serial(PICO_SERIAL, PICO_BAUD, timeout=1.0)
-        print(f"[bridge] connected to {PICO_SERIAL}@{PICO_BAUD}", flush=True)
+        with _serial_lock:
+            _serial.write(json.dumps({"cmd": "dashboard", "interval_ms": 1000}).encode() + b"\n")
+        print("[bridge] enabled dashboard mode on Pico", flush=True)
     except Exception as e:
-        print(f"[bridge] ERROR opening {PICO_SERIAL}: {e}", flush=True)
-        return
+        print(f"[bridge] failed to enable dashboard: {e}", flush=True)
 
     buf = b""
     while True:
         try:
-            ch = ser.read(1)
-            if not ch:
-                time.sleep(0.01)
-                continue
-            buf += ch
-            if ch == b'\n':
-                line = buf.decode().strip()
-                buf = b""
+            # Read all available bytes at once (much faster than byte-by-byte)
+            with _serial_lock:
+                waiting = _serial.in_waiting
+                if waiting > 0:
+                    chunk = _serial.read(waiting)
+                    buf += chunk
+                else:
+                    # Small sleep to avoid busy-waiting
+                    time.sleep(0.05)
+                    continue
+
+            # Process complete lines
+            while b'\n' in buf:
+                line, buf = buf.split(b'\n', 1)
+                line = line.decode().strip()
                 if not line:
                     continue
                 try:
@@ -79,13 +103,20 @@ def read_pico():
                 # Broadcast to all TCP clients
                 broadcast(data)
         except serial.SerialException:
-            print("[bridge] serial disconnected, retrying in 5s...", flush=True)
+            print("[bridge] serial disconnected, reconnecting in 5s...", flush=True)
             time.sleep(5)
             try:
-                ser.close()
-                ser.open()
+                if _serial and _serial.is_open:
+                    _serial.close()
+                _serial = serial.Serial(PICO_SERIAL, PICO_BAUD, timeout=2)
+                with _serial_lock:
+                    _serial.reset_input_buffer()
+                print("[bridge] reconnected to serial", flush=True)
             except Exception:
-                time.sleep(5)
+                time.sleep(3)
+        except Exception as e:
+            print(f"[bridge] read error: {e}", flush=True)
+            time.sleep(1)
 
 # ---------------------------------------------------------------------------
 # Broadcast to TCP clients
@@ -165,11 +196,14 @@ def handle_client(sock):
         print("[bridge] client disconnected", flush=True)
 
 def forward_to_pico(req):
-    """Send a command to the Pico via serial."""
+    """Send a command to the Pico via shared serial connection."""
+    global _serial
     try:
-        ser = serial.Serial(PICO_SERIAL, PICO_BAUD, timeout=0.5)
-        ser.write((json.dumps(req) + "\n").encode())
-        ser.close()
+        with _serial_lock:
+            if _serial and _serial.is_open:
+                _serial.write((json.dumps(req) + "\n").encode())
+            else:
+                print("[bridge] serial not connected, cannot forward", flush=True)
     except Exception as e:
         print(f"[bridge] error forwarding to Pico: {e}", flush=True)
 

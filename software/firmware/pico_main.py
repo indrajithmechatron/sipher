@@ -408,8 +408,9 @@ def cmd_clear():
     return {"clear": "ok"}
 
 def cmd_dashboard(interval_ms):
-    global _dashboard_interval
+    global _dashboard_interval, _dashboard_running
     _dashboard_interval = interval_ms
+    _dashboard_running = interval_ms > 0
     return {"dashboard": "started" if interval_ms > 0 else "stopped"}
 
 def cmd_ping():
@@ -459,8 +460,8 @@ CMD_MAP = {
     "nrf_test": (lambda p: nrf_test(p.get("count", 10), p.get("delay_ms", 1000))),
 }
 
-_dashboard_interval = 0
-_dashboard_running = False
+_dashboard_interval = 1000  # auto-start 1s sensor stream on boot
+_dashboard_running = True  # auto-start dashboard mode on boot
 
 # ---------------------------------------------------------------------------
 # Main loop — read JSON lines from USB, dispatch, write JSON back
