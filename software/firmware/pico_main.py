@@ -233,7 +233,7 @@ def _tft_init_spi():
     if _TFT_SPI is not None:
         return _TFT_SPI
     try:
-        _TFT_SPI = machine.SPI(0, freq=40_000_000, polarity=0, phase=0,
+        _TFT_SPI = machine.SPI(0, baudrate=40_000_000, polarity=0, phase=0,
                                 sck=machine.Pin(18), mosi=machine.Pin(19),
                                 miso=machine.Pin(16))
     except Exception:
@@ -606,11 +606,18 @@ def main():
     tft_ok = tft_init()
     print(_json.dumps({"version": "sipher-pico-main-v3", "tft": tft_ok, "ready": True}))
     buf = b""
+    last_tick = time.ticks_ms()
     while True:
         try:
+            if _dashboard_running and _dashboard_interval > 0:
+                if time.ticks_diff(time.ticks_ms(), last_tick) >= _dashboard_interval:
+                    last_tick = time.ticks_ms()
+                    sensors = cmd_sensors()
+                    sensors["cmd"] = "dashboard_tick"
+                    print(_json.dumps(sensors))
             ch = sys.stdin.buffer.read(1)
             if not ch:
-                time.sleep_ms(10)
+                time.sleep_ms(2)
                 continue
             buf += ch
             if ch == b'\n':
@@ -633,11 +640,6 @@ def main():
                 else:
                     resp = {"echo": req, "ts": time.ticks_ms()}
                 print(_json.dumps(resp))
-            if _dashboard_running and _dashboard_interval > 0:
-                time.sleep_ms(max(0, _dashboard_interval - 10))
-                sensors = cmd_sensors()
-                sensors["cmd"] = "dashboard_tick"
-                print(_json.dumps(sensors))
         except Exception as e:
             print(_json.dumps({"error": str(e)}))
             buf = b""
