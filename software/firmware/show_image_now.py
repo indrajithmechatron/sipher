@@ -20,7 +20,7 @@ RST.value(1); time.sleep_ms(10)
 cmd(0x01); time.sleep_ms(150)
 cmd(0x28)
 cmd(0x3A); data(b'\x55')
-cmd(0x36); data(b'\xE0')
+cmd(0x36); data(b'\x20')
 cmd(0x11); time.sleep_ms(120)
 cmd(0x29); time.sleep_ms(50)
 
