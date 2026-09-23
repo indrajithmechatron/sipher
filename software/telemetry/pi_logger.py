@@ -1,16 +1,34 @@
 #!/usr/bin/env python3
-# pi_logger.py — sipher Pi 4 logs Pico JSON + USB mic level
+# pi_logger.py — sipher Pi 4 logs Pico JSON by subscribing to the bridge TCP stream
+# The bridge (robot.pico_bridge) owns /dev/ttyACM0. Never open the serial port here.
 # Run on sipher@192.168.1.35: python3 pi_logger.py
-import serial, time, json, subprocess, pathlib
-port="/dev/ttyACM0"; baud=115200
-try:
-    import serial
-except: print("pip3 install pyserial"); raise
-ser=serial.Serial(port, 115200, timeout=1)
-log=pathlib.Path("/home/sipher/sipher.log")
-print(f"Logging {port} → {log} (USB mic hw:3,0 also alive: arecord -D hw:3,0 -f S16_LE -r 16000)")
+import socket, time, pathlib, os
+
+HOST = os.environ.get("SIPHER_BRIDGE_HOST", "127.0.0.1")
+PORT = int(os.environ.get("SIPHER_BRIDGE_PORT", "5000"))
+log = pathlib.Path(os.environ.get("SIPHER_LOG_FILE", "/home/sipher/sipher.log"))
+
+print(f"Logging bridge TCP {HOST}:{PORT} → {log}")
 while True:
-    l=ser.readline().decode(errors="ignore").strip()
-    if l:
-        print(l)
-        log.open("a").write(l+"\n")
+    try:
+        s = socket.create_connection((HOST, PORT), timeout=5)
+        print(f"Connected to bridge at {HOST}:{PORT}")
+        s.settimeout(None)
+        buf = b""
+        while True:
+            ch = s.recv(1)
+            if not ch:
+                print("Bridge closed, reconnecting in 5s...")
+                time.sleep(5)
+                break
+            buf += ch
+            if ch == b"\n":
+                l = buf.decode(errors="ignore").strip()
+                buf = b""
+                if l:
+                    print(l)
+                    with log.open("a") as f:
+                        f.write(l + "\n")
+    except Exception as e:
+        print(f"Bridge connection error: {e}, retrying in 5s...")
+        time.sleep(5)
