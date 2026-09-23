@@ -38,6 +38,7 @@ DASHBOARD_PATH = _THIS_DIR.parent / "dashboard" / "index.html"
 # Sensor data — polled from bridge HTTP endpoint (port 5001)
 # ---------------------------------------------------------------------------
 _latest_sensor = {}
+_sensor_meta = {"pico_live": False, "pico_age_ms": None, "bridge_ok": False}
 _sensor_lock = threading.Lock()
 
 def _sensor_poller():
@@ -47,15 +48,32 @@ def _sensor_poller():
             with urllib.request.urlopen(BRIDGE_SENSOR_URL, timeout=3) as resp:
                 data = json.loads(resp.read().decode())
                 if data:
+                    meta = data.pop("_meta", {}) or {}
+                    pico = meta.get("pico") or {}
                     with _sensor_lock:
-                        _latest_sensor.update(data)
+                        if any(k in data for k in ("mpu", "vl53_mm", "ina", "gps", "i2c0", "i2c1")):
+                            _latest_sensor.clear()
+                            _latest_sensor.update(data)
+                        _sensor_meta["pico_live"] = bool(pico.get("live"))
+                        _sensor_meta["pico_age_ms"] = pico.get("age_ms")
+                        _sensor_meta["bridge_ok"] = True
         except Exception:
-            pass
+            with _sensor_lock:
+                _sensor_meta["bridge_ok"] = False
         time.sleep(1)
 
 def get_latest_sensor():
     with _sensor_lock:
-        return dict(_latest_sensor)
+        data = dict(_latest_sensor)
+        meta = dict(_sensor_meta)
+    data["_meta"] = {
+        "pi": True,
+        "pico": meta.get("pico_live", False),
+        "pico_age_ms": meta.get("pico_age_ms"),
+        "bridge": meta.get("bridge_ok", False),
+        "ts": time.time(),
+    }
+    return data
 
 _sensor_thread = threading.Thread(target=_sensor_poller, daemon=True)
 _sensor_thread.start()
@@ -165,6 +183,8 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
                 "uptime": uptime,
                 "pico_serial": PICO_SERIAL,
                 "port": PORT,
+                "pi_live": True,
+                "pico_live": get_latest_sensor().get("_meta", {}).get("pico", False),
             })
         elif self.path == "/health":
             self.send_json({"status": "ok"})
@@ -194,12 +214,21 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         try:
             import socket
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)
+            sock.settimeout(3)
             sock.connect(("127.0.0.1", 5000))
             sock.sendall((json.dumps(req) + "\n").encode())
-            resp = sock.recv(4096).decode()
+            buf = b""
+            while b"\n" not in buf:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
             sock.close()
-            self.send_json(json.loads(resp) if resp.strip() else {"bridge": "ok"})
+            line = buf.split(b"\n", 1)[0].decode(errors="replace").strip()
+            if not line:
+                self.send_json({"bridge": "ok"})
+                return
+            self.send_json(json.loads(line))
         except Exception as e:
             self.send_json({"error": f"bridge not reachable: {e}"})
 

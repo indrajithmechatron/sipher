@@ -39,18 +39,31 @@ TCP_HOST = os.environ.get("SIPHER_BRIDGE_HOST", "0.0.0.0")
 # ---------------------------------------------------------------------------
 _latest_sensor = {}
 _sensor_lock = threading.Lock()
+_pico_last_rx = 0.0
 _clients = []  # TCP client sockets
 _clients_lock = threading.Lock()
-_stdin_buf = b""
 _serial = None  # shared serial connection
 _serial_lock = threading.Lock()
+_SENSOR_KEYS = ("mpu", "vl53_mm", "ina", "gps", "i2c0", "i2c1")
+
+
+def _now():
+    return time.time()
+
+
+def pico_status():
+    age = (_now() - _pico_last_rx) if _pico_last_rx else None
+    return {
+        "live": age is not None and age < 5.0,
+        "age_ms": int(age * 1000) if age is not None else None,
+    }
 
 # ---------------------------------------------------------------------------
 # Serial reader — read JSON lines from Pico
 # ---------------------------------------------------------------------------
 def read_pico():
     """Continuously read JSON lines from Pico serial port."""
-    global _stdin_buf, _latest_sensor, _serial
+    global _latest_sensor, _serial, _pico_last_rx
     while True:
         try:
             _serial = serial.Serial(PICO_SERIAL, PICO_BAUD, timeout=2)
@@ -60,12 +73,10 @@ def read_pico():
             print(f"[bridge] ERROR opening {PICO_SERIAL}: {e}, retrying...", flush=True)
             time.sleep(3)
 
-    # Drain boot noise
     time.sleep(2)
     with _serial_lock:
         _serial.reset_input_buffer()
 
-    # Enable dashboard mode on Pico
     try:
         with _serial_lock:
             _serial.write(json.dumps({"cmd": "dashboard", "interval_ms": 1000}).encode() + b"\n")
@@ -76,31 +87,43 @@ def read_pico():
     buf = b""
     while True:
         try:
-            # Read all available bytes at once (much faster than byte-by-byte)
             with _serial_lock:
                 waiting = _serial.in_waiting
                 if waiting > 0:
                     chunk = _serial.read(waiting)
                     buf += chunk
                 else:
-                    # Small sleep to avoid busy-waiting
-                    time.sleep(0.05)
-                    continue
+                    pass
+            if b"\n" not in buf:
+                time.sleep(0.05)
+                continue
 
-            # Process complete lines
-            while b'\n' in buf:
-                line, buf = buf.split(b'\n', 1)
-                line = line.decode().strip()
+            while b"\n" in buf:
+                raw, buf = buf.split(b"\n", 1)
+                line = raw.decode(errors="replace").strip()
                 if not line:
                     continue
                 try:
                     data = json.loads(line)
                 except json.JSONDecodeError:
+                    print(f"[bridge] rx non-json: {line[:160]}", flush=True)
                     continue
-                # Update latest sensor snapshot
-                with _sensor_lock:
-                    _latest_sensor = data
-                # Broadcast to all TCP clients
+
+                _pico_last_rx = _now()
+                if isinstance(data, dict) and (
+                    data.get("cmd") == "dashboard_tick"
+                    or any(k in data for k in _SENSOR_KEYS)
+                ):
+                    with _sensor_lock:
+                        _latest_sensor = data
+                    print(
+                        f"[bridge] rx tick mpu={bool(data.get('mpu'))} "
+                        f"vl53={data.get('vl53_mm')} ina={bool(data.get('ina'))} "
+                        f"gps_fix={bool((data.get('gps') or {}).get('fix'))}",
+                        flush=True,
+                    )
+                else:
+                    print(f"[bridge] rx json: {json.dumps(data)[:200]}", flush=True)
                 broadcast(data)
         except serial.SerialException:
             print("[bridge] serial disconnected, reconnecting in 5s...", flush=True)
@@ -122,23 +145,28 @@ def read_pico():
 # Broadcast to TCP clients
 # ---------------------------------------------------------------------------
 def broadcast(data):
-    """Send JSON data to all connected TCP clients."""
+    """Send JSON data to all connected TCP clients (non-blocking per-client)."""
     if not data:
         return
     payload = json.dumps(data) + "\n"
     with _clients_lock:
-        dead = []
-        for sock in _clients:
-            try:
-                sock.sendall(payload.encode())
-            except Exception:
-                dead.append(sock)
-        for sock in dead:
-            _clients.remove(sock)
-            try:
-                sock.close()
-            except Exception:
-                pass
+        clients = list(_clients)
+    dead = []
+    for sock in clients:
+        try:
+            sock.settimeout(1.0)
+            sock.sendall(payload.encode())
+        except Exception:
+            dead.append(sock)
+    if dead:
+        with _clients_lock:
+            for sock in dead:
+                if sock in _clients:
+                    _clients.remove(sock)
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
 # ---------------------------------------------------------------------------
 # TCP server — accept commands from clients
@@ -164,7 +192,7 @@ def tcp_server():
             time.sleep(1)
 
 def handle_client(sock):
-    """Read commands from a TCP client and forward to Pico."""
+    """Read commands from a TCP client, forward to Pico, ack immediately."""
     buf = b""
     try:
         while True:
@@ -181,8 +209,18 @@ def handle_client(sock):
                     req = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                # Forward to Pico via serial
-                forward_to_pico(req)
+                ok = forward_to_pico(req)
+                try:
+                    ack = json.dumps({
+                        "bridge_ack": True,
+                        "forwarded": ok,
+                        "cmd": req.get("cmd") if isinstance(req, dict) else None,
+                        "ts": _now(),
+                    }) + "\n"
+                    sock.settimeout(1.0)
+                    sock.sendall(ack.encode())
+                except Exception:
+                    pass
     except Exception as e:
         print(f"[bridge] client error: {e}", flush=True)
     finally:
@@ -202,10 +240,11 @@ def forward_to_pico(req):
         with _serial_lock:
             if _serial and _serial.is_open:
                 _serial.write((json.dumps(req) + "\n").encode())
-            else:
-                print("[bridge] serial not connected, cannot forward", flush=True)
+                return True
+            print("[bridge] serial not connected, cannot forward", flush=True)
     except Exception as e:
         print(f"[bridge] error forwarding to Pico: {e}", flush=True)
+    return False
 
 # ---------------------------------------------------------------------------
 # HTTP endpoint — for dashboard / simple sensor queries
@@ -221,6 +260,11 @@ def http_handler(conn):
     if "GET /sensor" in request_line:
         with _sensor_lock:
             snapshot = dict(_latest_sensor)
+        snapshot["_meta"] = {
+            "pico": pico_status(),
+            "ts": _now(),
+            "serial": PICO_SERIAL,
+        }
         body = json.dumps(snapshot).encode()
         response = (
             "HTTP/1.1 200 OK\r\n"
@@ -231,11 +275,16 @@ def http_handler(conn):
         )
         conn.sendall(response.encode() + body)
     elif "GET /health" in request_line:
-        body = b'{"status":"ok","pico_serial":"' + PICO_SERIAL.encode() + b'"}'
+        body = json.dumps({
+            "status": "ok",
+            "pico_serial": PICO_SERIAL,
+            "pico": pico_status(),
+        }).encode()
         response = (
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: application/json\r\n"
             f"Content-Length: {len(body)}\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
             "\r\n"
         )
         conn.sendall(response.encode() + body)

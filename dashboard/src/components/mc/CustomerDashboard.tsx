@@ -55,8 +55,16 @@ export function CustomerDashboard({
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <span className="hidden items-center gap-2 font-mono text-[10px] text-ok sm:flex">
-            <span className="live-dot size-1.5 rounded-full bg-ok" /> All systems operational
+          <span className={cn(
+            "hidden items-center gap-2 font-mono text-[10px] sm:flex",
+            tele.piOnline && tele.picoOnline ? "text-ok" : tele.piOnline ? "text-warn" : "text-danger",
+          )}>
+            <span className={cn("size-1.5 rounded-full", tele.piOnline && tele.picoOnline ? "bg-ok live-dot" : tele.piOnline ? "bg-warn" : "bg-danger")} />
+            {tele.piOnline && tele.picoOnline
+              ? "Pi + Pico live"
+              : tele.piOnline
+                ? "Pi live · Pico offline"
+                : "Offline"}
           </span>
           <Button variant="outline" size="sm" onClick={onDeveloperControl} className="border-hairline bg-transparent font-mono text-[10px] text-muted-foreground">
             <Wrench /> Developer control
@@ -130,7 +138,7 @@ export function CustomerDashboard({
               <div className="hairline-b flex items-center justify-between px-5 py-4"><div className="font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">Recent activity</div><Button variant="ghost" size="sm" className="h-6 px-2 font-mono text-[10px] text-muted-foreground">View all <ArrowRight /></Button></div>
               <div className="divide-y divide-hairline/60">{tele.events.slice(0, 4).map((event) => <div key={event.id} className="flex items-center gap-3 px-5 py-3"><span className={cn("size-1.5 rounded-full", event.status === "failed" ? "bg-danger" : event.status === "escalated" ? "bg-warn" : "bg-ok")} /><div className="min-w-0 flex-1"><div className="truncate text-xs text-foreground">{event.detail}</div><div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{event.agent} · {event.action}</div></div><span className="flex shrink-0 items-center gap-1 font-mono text-[10px] text-muted-foreground"><Clock3 className="size-3" /> {event.t}</span></div>)}</div>
             </div>
-            <div className="border border-hairline bg-panel p-5"><div className="font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">Connection health</div><div className="mt-5 space-y-4">{[["Robot connection", `${tele.linkMs} ms latency`, tele.ros === "connected"], ["Mission control", `${tele.loopHz} Hz control loop`, tele.loopHz > 380], ["Safety systems", `${tele.contacts}/4 foot contacts`, tele.contacts >= 3]].map(([label, detail, good]) => <div key={String(label)} className="flex items-center gap-3"><CheckCircle2 className={cn("size-4", good ? "text-ok" : "text-warn")} /><div><div className="text-xs text-foreground">{label}</div><div className="font-mono text-[10px] text-muted-foreground">{detail}</div></div></div>)}</div></div>
+            <div className="border border-hairline bg-panel p-5"><div className="font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">Connection health</div><div className="mt-5 space-y-4">{[["Pi", tele.piOnline ? "live · command endpoint" : "offline", tele.piOnline], ["Pico", tele.picoOnline ? `live · ${tele.picoAgeMs ?? "—"} ms` : "offline", tele.picoOnline], ["Mission control", `${tele.loopHz} Hz control loop`, tele.loopHz > 0], ["Safety systems", `${tele.contacts}/4 foot contacts`, tele.contacts >= 3]].map(([label, detail, good]) => <div key={String(label)} className="flex items-center gap-3"><CheckCircle2 className={cn("size-4", good ? "text-ok" : "text-warn")} /><div><div className="text-xs text-foreground">{label}</div><div className="font-mono text-[10px] text-muted-foreground">{detail}</div></div></div>)}</div></div>
           </section>
         </div>
       </main>
