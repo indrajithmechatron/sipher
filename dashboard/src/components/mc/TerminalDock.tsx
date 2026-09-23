@@ -16,13 +16,49 @@ const colorFor: Record<string, string> = {
 
 export function TerminalBody({ id, tele }: { id: string; tele?: Telemetry }) {
   const term = TERMINALS.find((t) => t.id === id);
-  const live =
-    tele && id === "agent"
-      ? tele.events.slice(0, 8).map((e) => ({
-          c: e.status === "escalated" ? "warn" : e.status === "failed" ? "danger" : "signal",
-          text: `▸ ${e.agent.padEnd(14)} ${e.action.replace("tool:", "").padEnd(18)} ${e.latency.padStart(7)}  ${e.status}`,
-        }))
-      : [];
+  let live: { c: string; text: string }[] = [];
+  if (tele && id === "agent") {
+    live = tele.events.slice(0, 8).map((e) => ({
+      c: e.status === "escalated" ? "warn" : e.status === "failed" ? "danger" : "signal",
+      text: `▸ ${e.agent.padEnd(14)} ${e.action.replace("tool:", "").padEnd(18)} ${e.latency.padStart(7)}  ${e.status}`,
+    }));
+  } else if (tele && id === "sensors") {
+    const s = tele.raw;
+    live = [
+      { c: "muted", text: "$ GET /api/sensors" },
+      {
+        c: tele.piOnline ? "ok" : "danger",
+        text: `pi: ${tele.piOnline ? "LIVE" : "OFFLINE"} · pico: ${tele.picoOnline ? "LIVE" : "OFFLINE"}${tele.picoAgeMs != null ? ` · age ${tele.picoAgeMs}ms` : ""}`,
+      },
+      s
+        ? {
+            c: "fg",
+            text: `mpu: [${(s.mpu ?? []).map((v) => Number(v).toFixed(2)).join(", ")}]`,
+          }
+        : { c: "muted", text: "mpu: —" },
+      s?.ina
+        ? {
+            c: "fg",
+            text: `ina: { voltage_v: ${s.ina.voltage_v ?? "—"}, current_ma: ${s.ina.current_ma ?? "—"} }`,
+          }
+        : { c: "warn", text: "ina: null" },
+      s?.vl53_mm != null
+        ? { c: "fg", text: `vl53_mm: ${s.vl53_mm}` }
+        : { c: "warn", text: "vl53_mm: null" },
+      s?.gps
+        ? {
+            c: s.gps.fix ? "ok" : "warn",
+            text: `gps: fix=${s.gps.fix ? "yes" : "no"} sat=${s.gps.satellites ?? "—"} speed=${s.gps.speed_knots ?? "—"} kn raw=${(s.gps.raw ?? "").slice(0, 48)}`,
+          }
+        : { c: "muted", text: "gps: —" },
+      s
+        ? {
+            c: "muted",
+            text: `i2c0: [${(s.i2c0 ?? []).join(", ")}]  i2c1: [${(s.i2c1 ?? []).join(", ")}]`,
+          }
+        : { c: "muted", text: "i2c: —" },
+    ];
+  }
   return (
     <div className="h-full overflow-y-auto bg-background px-3 py-2 font-mono text-[11px] leading-[1.6]">
       {term?.host && (
@@ -30,7 +66,7 @@ export function TerminalBody({ id, tele }: { id: string; tele?: Telemetry }) {
           <Dot tone="ok" live /> {term.host}
         </div>
       )}
-      {[...live, ...(TERMINAL_LINES[id] ?? [])].map((l, i) => (
+      {[...live, ...(id === "sensors" || id === "agent" ? [] : TERMINAL_LINES[id] ?? [])].map((l, i) => (
         <div key={i} className={colorFor[l.c]}>
           {l.text}
         </div>

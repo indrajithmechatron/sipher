@@ -110,21 +110,92 @@ function ContextBody({ sel, tele }: { sel: Selection; tele: Telemetry }) {
   return (
     <>
       <Section title="State" />
-      <Field label="Mode" value="AUTONOMOUS" tone="text-signal" />
+      <Field
+        label="Pi"
+        value={tele.piOnline ? "LIVE" : "OFFLINE"}
+        tone={tele.piOnline ? "text-ok" : "text-danger"}
+      />
+      <Field
+        label="Pico"
+        value={tele.picoOnline ? "LIVE" : "OFFLINE"}
+        tone={tele.picoOnline ? "text-ok" : "text-danger"}
+      />
+      <Field
+        label="Pico age"
+        value={tele.picoAgeMs != null ? `${tele.picoAgeMs} ms` : "—"}
+        tone={tele.picoAgeMs != null && tele.picoAgeMs < 2000 ? "text-ok" : "text-warn"}
+      />
+      <Field label="Mode" value={tele.picoOnline ? "AUTONOMOUS" : "STANDBY"} tone="text-signal" />
       <Field label="Gait" value="idle" />
       <Field label="Velocity" value={`${tele.velocity.toFixed(2)} m/s`} />
-      <Field label="Battery" value={`${tele.bus.toFixed(2)} V`} tone={tele.bus < 5 ? "text-warn" : "text-ok"} />
-      <Field label="Bus voltage" value={`${tele.bus.toFixed(2)} V`} />
-      <Field label="Temp (core)" value={`${tele.tempCore.toFixed(1)} C`} tone={tele.tempCore > 60 ? "text-warn" : ""} />
-      <Field label="ToF height" value={`${tele.contacts >= 4 ? "< 500" : tele.contacts >= 3 ? "500-1000" : "> 1000"} mm`} />
+      <Field
+        label="Battery"
+        value={tele.bus > 0 ? `${tele.bus.toFixed(2)} V` : "—"}
+        tone={tele.bus > 0 && tele.bus < 10 ? "text-warn" : "text-ok"}
+      />
+      <Field label="Bus voltage" value={tele.bus > 0 ? `${tele.bus.toFixed(2)} V` : "—"} />
+      <Field
+        label="Temp (core)"
+        value={tele.tempCore > 0 ? `${tele.tempCore.toFixed(1)} C` : "—"}
+        tone={tele.tempCore > 60 ? "text-warn" : ""}
+      />
+      <Field
+        label="ToF height"
+        value={
+          tele.contacts >= 4
+            ? "< 500 mm"
+            : tele.contacts >= 3
+              ? "500-1000 mm"
+              : tele.contacts > 0
+                ? "> 1000 mm"
+                : "—"
+        }
+      />
+      <Section title="Live sensors" />
+      <Field
+        label="MPU6050"
+        value={tele.raw?.mpu?.length ? `ok · ${tele.raw.mpu.length} axes` : "—"}
+        tone={tele.raw?.mpu?.length ? "text-ok" : "text-warn"}
+      />
+      <Field
+        label="INA219"
+        value={
+          tele.raw?.ina
+            ? `${tele.raw.ina.voltage_v ?? "—"} V · ${tele.raw.ina.current_ma ?? "—"} mA`
+            : "null"
+        }
+        tone={tele.raw?.ina ? "text-ok" : "text-warn"}
+      />
+      <Field
+        label="VL53L0X"
+        value={tele.raw?.vl53_mm != null ? `${tele.raw.vl53_mm} mm` : "null"}
+        tone={tele.raw?.vl53_mm != null ? "text-ok" : "text-warn"}
+      />
+      <Field
+        label="GPS"
+        value={
+          tele.raw?.gps
+            ? tele.raw.gps.fix
+              ? `fix · ${tele.raw.gps.satellites ?? "—"} sat`
+              : "no fix"
+            : "—"
+        }
+        tone={tele.raw?.gps?.fix ? "text-ok" : "text-warn"}
+      />
+      <Field
+        label="I2C0"
+        value={(tele.raw?.i2c0 ?? []).join(" ") || "empty"}
+        tone={(tele.raw?.i2c0 ?? []).length ? "text-ok" : "text-warn"}
+      />
+      <Field
+        label="I2C1"
+        value={(tele.raw?.i2c1 ?? []).join(" ") || "empty"}
+        tone={(tele.raw?.i2c1 ?? []).length ? "text-ok" : "text-warn"}
+      />
       <Section title="Safety Envelope" />
       <Field label="Slope limit" value="18.0 deg" />
       <Field label="Current pitch" value={`${tele.pitch.toFixed(1)} deg`} tone={tele.pitch > 18 ? "text-warn" : "text-ok"} />
       <Field label="E-stop" value="ARMED" tone="text-ok" />
-      <Section title="Sensors" />
-      <Field label="I2C0" value="PCA INA VL53" />
-      <Field label="I2C1" value="MPU6050" />
-      <Field label="Control loop" value={`${tele.loopHz} Hz`} />
     </>
   );
 }

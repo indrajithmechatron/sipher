@@ -1,4 +1,4 @@
-import { AlertTriangle, BatteryMedium, Cpu, Gauge, Radio, Thermometer } from "lucide-react";
+import { AlertTriangle, BatteryMedium, Cpu, Gauge, Radio, Server, Thermometer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dot } from "./chrome";
 import type { Telemetry } from "./sipher";
@@ -50,15 +50,26 @@ export function HealthStrip({
         <Dot tone="signal" live /> {preset}
       </span>
       <Metric
+        icon={Server}
+        label="Pi"
+        value={tele.piOnline ? "live" : "offline"}
+        tone={tele.piOnline ? "ok" : "danger"}
+      />
+      <Metric
         icon={Radio}
         label="Pico"
-        value={tele.ros === "connected" ? "online" : "offline"}
-        tone={tele.ros === "connected" ? "ok" : "warn"}
+        value={tele.picoOnline ? "live" : "offline"}
+        tone={tele.picoOnline ? "ok" : tele.piOnline ? "warn" : "danger"}
       />
       <Metric
         label="Sensors"
         value={`${tele.mcp.up}/${tele.mcp.total}`}
         tone={tele.mcp.up < tele.mcp.total ? "warn" : "ok"}
+      />
+      <Metric
+        label="link"
+        value={tele.picoAgeMs != null ? `${tele.picoAgeMs} ms` : "—"}
+        tone={tele.picoAgeMs != null && tele.picoAgeMs < 2000 ? "ok" : "warn"}
       />
       <Metric icon={Gauge} label="loop" value={`${tele.loopHz} Hz`} tone={loopTone} />
       <Metric icon={Cpu} label="infer" value={`${tele.inferenceMs.toFixed(1)} ms`} />

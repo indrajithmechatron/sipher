@@ -51,22 +51,41 @@ export type Telemetry = {
   joints: Joint[];
   history: number[][];
   ros: "connected" | "degraded";
+  piOnline: boolean;
+  picoOnline: boolean;
+  picoAgeMs: number | null;
+  raw: SensorPayload | null;
   mcp: { total: number; up: number };
   mission: { name: string; step: number; total: number; state: string };
   agents: Agent[];
   events: LiveEvent[];
 };
 
-type SensorPayload = {
+export type SensorPayload = {
+  cmd?: string;
   mpu?: number[];
-  gps?: { lat?: number; lon?: number; raw?: string };
-  vl53_mm?: number;
-  ina?: { voltage_v?: number; current_ma?: number };
+  gps?: {
+    lat?: number;
+    lon?: number;
+    raw?: string;
+    fix?: boolean;
+    speed_knots?: number;
+    satellites?: number;
+  };
+  vl53_mm?: number | null;
+  ina?: { voltage_v?: number; current_ma?: number; shunt_uv?: number } | null;
   pca?: { duty?: number; pulse_ms?: number; pulse_us?: number };
   i2c0?: string[];
   i2c1?: string[];
   uptime_s?: number;
   version?: string;
+  _meta?: {
+    pi?: boolean;
+    pico?: boolean;
+    pico_age_ms?: number | null;
+    bridge?: boolean;
+    ts?: number;
+  };
 };
 
 const API = typeof window !== "undefined" ? window.location.origin : "";
@@ -107,18 +126,20 @@ export function useSipherTelemetry(): Telemetry {
   const tick = useRef(0);
   const eventId = useRef(100);
   const sensorRef = useRef<SensorPayload>({});
+  const piOkRef = useRef(false);
 
   const [state, setState] = useState<Telemetry>(() => ({
     clock: fmtClock(new Date()),
-    battery: 12.4, minutes: 99, tempCore: 42, tempMotor: 44, bus: 12.4,
-    loopHz: 1, linkMs: 0, cpu: 0, gpu: 0, inferenceMs: 0,
-    pitch: 0, roll: 0, yaw: 0, velocity: 0, contacts: 4,
+    battery: 0, minutes: 0, tempCore: 0, tempMotor: 0, bus: 0,
+    loopHz: 0, linkMs: 0, cpu: 0, gpu: 0, inferenceMs: 0,
+    pitch: 0, roll: 0, yaw: 0, velocity: 0, contacts: 0,
     joints: JOINTS.map((j) => ({ ...j, target: j.value })),
     history: JOINTS.map(() => Array.from({ length: 60 }, () => 90)),
-    ros: "connected", mcp: { total: 5, up: 0 },
+    ros: "degraded", piOnline: false, picoOnline: false, picoAgeMs: null, raw: null,
+    mcp: { total: 5, up: 0 },
     mission: { name: "sensor_init", step: 0, total: 5, state: "INIT" },
     agents: AGENT_SEEDS.map((a) => ({
-      ...a, state: "running" as AgentState, latency: 0, tokens: 0, cost: 0, steps: 0,
+      ...a, state: "idle" as AgentState, latency: 0, tokens: 0, cost: 0, steps: 0,
     })),
     events: [],
   }));
@@ -129,8 +150,15 @@ export function useSipherTelemetry(): Telemetry {
     const pollSensors = async () => {
       try {
         const r = await fetch(`${API}/api/sensors`);
-        if (r.ok) sensorRef.current = await r.json();
-      } catch { /* Pi offline */ }
+        if (r.ok) {
+          sensorRef.current = await r.json();
+          piOkRef.current = true;
+        } else {
+          piOkRef.current = false;
+        }
+      } catch {
+        piOkRef.current = false;
+      }
     };
 
     const iv = setInterval(() => {
@@ -140,10 +168,23 @@ export function useSipherTelemetry(): Telemetry {
       const s = sensorRef.current;
       pollSensors();
 
+      const meta = s._meta;
+      const piOnline = piOkRef.current;
+      const picoOnline = meta?.pico ?? ((s.mpu?.length ?? 0) > 0 && piOnline);
+      const picoAgeMs = meta?.pico_age_ms ?? null;
       const { pitch, roll, yaw } = computePitchRoll(s.mpu ?? []);
-      const voltageV = s.ina?.voltage_v ?? 12.4;
-      const battery = clamp(voltageV / 12.6 * 100, 0, 100);
-      const contacts = s.vl53_mm != null ? (s.vl53_mm < 500 ? 4 : s.vl53_mm < 1000 ? 3 : 2) : 4;
+      const voltageV = s.ina?.voltage_v ?? 0;
+      const battery = voltageV > 0 ? clamp(voltageV / 12.6 * 100, 0, 100) : 0;
+      const contacts = s.vl53_mm != null ? (s.vl53_mm < 500 ? 4 : s.vl53_mm < 1000 ? 3 : 2) : 0;
+      const speedMs = s.gps?.speed_knots != null ? s.gps.speed_knots * 0.514444 : 0;
+
+      const sensorUp = [
+        (s.mpu?.length ?? 0) > 0,
+        s.ina != null,
+        s.vl53_mm != null,
+        s.gps?.raw != null,
+        (s.i2c0?.length ?? 0) > 0 || (s.i2c1?.length ?? 0) > 0,
+      ].filter(Boolean).length;
 
       const joints = JOINTS.map((j, i) => {
         const target = j.value + Math.sin(n / 6 + i) * 1.2;
@@ -165,15 +206,15 @@ export function useSipherTelemetry(): Telemetry {
         if (pitch > 25 && a.name === "imu-reader") {
           next.state = "escalated"; next.reason = `pitch ${pitch.toFixed(1)} deg exceeds limit`;
           next.escalateTo = "operator"; next.steps = a.steps + 1;
-        } else { next.state = "running"; next.reason = undefined; next.escalateTo = undefined; }
+        } else { next.state = picoOnline ? "running" : "idle"; next.reason = undefined; next.escalateTo = undefined; }
         return next;
       });
 
       let events = state.events;
-      if (n % 3 === 0) {
+      if (n % 3 === 0 && piOnline) {
         const a = pick(agents);
         eventId.current += 1;
-        const status = a.state === "escalated" ? "escalated" as const : Math.random() > 0.5 ? "ok" as const : "running" as const;
+        const status = a.state === "escalated" ? "escalated" as const : picoOnline ? "ok" as const : "running" as const;
         events = [
           { id: eventId.current, t: fmtClock(new Date()), agent: a.name, action: `tool:${a.tool}`,
             detail: a.reason ?? a.task, status, latency: `${a.latency} ms`, tokens: Math.round(rnd(20, 200)) },
@@ -183,19 +224,25 @@ export function useSipherTelemetry(): Telemetry {
 
       setState({
         clock: fmtClock(new Date()),
-        battery, minutes: Math.round(battery * 0.5),
-        tempCore: clamp(s.mpu ? 42 + rnd(-1, 1) : 42, 35, 80),
-        tempMotor: clamp(44 + rnd(-1, 1), 38, 85),
+        battery, minutes: battery > 0 ? Math.round(battery * 0.5) : 0,
+        tempCore: s.mpu && s.mpu.length >= 6 ? clamp(42 + (s.mpu[2] ?? 0) % 3, 35, 80) : 0,
+        tempMotor: 0,
         bus: voltageV,
-        loopHz: s.uptime_s ? Math.round(1000 / 1) : 1,
-        linkMs: Math.round(clamp(s.uptime_s ? 15 + rnd(-3, 3) : 0, 0, 200)),
+        loopHz: picoOnline ? 1 : 0,
+        linkMs: piOnline ? Math.round(clamp(15 + rnd(-3, 3), 0, 200)) : 0,
         cpu: 0, gpu: 0, inferenceMs: 0,
         pitch, roll, yaw,
-        velocity: clamp(s.velocity ?? 0 + rnd(-0.01, 0.01), 0, 1.4),
+        velocity: clamp(speedMs, 0, 30),
         contacts, joints, history,
-        ros: s.mpu ? "connected" : "degraded",
-        mcp: { total: 5, up: s.mpu ? 4 : 0 },
-        mission: { name: "sensor_sweep", step: s.vl53_mm != null ? 3 : 1, total: 5, state: s.mpu ? "RUNNING" : "INIT" },
+        ros: picoOnline && piOnline ? "connected" : "degraded",
+        piOnline, picoOnline, picoAgeMs, raw: piOnline ? s : null,
+        mcp: { total: 5, up: sensorUp },
+        mission: {
+          name: "sensor_sweep",
+          step: sensorUp,
+          total: 5,
+          state: picoOnline ? "RUNNING" : piOnline ? "DEGRADED" : "OFFLINE",
+        },
         agents, events,
       });
     }, 700);
