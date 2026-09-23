@@ -9,6 +9,10 @@ Hardware:
   USB   CDC port -> /dev/ttyACM0 on Pi (115200)
 """
 import machine, time, struct, sys, json as _json
+try:
+    import uselect
+except ImportError:
+    uselect = None
 
 # ---------------------------------------------------------------------------
 # Hardware init — dual I2C buses
@@ -607,6 +611,13 @@ def main():
     print(_json.dumps({"version": "sipher-pico-main-v3", "tft": tft_ok, "ready": True}))
     buf = b""
     last_tick = time.ticks_ms()
+    poller = None
+    if uselect is not None:
+        try:
+            poller = uselect.poll()
+            poller.register(sys.stdin, uselect.POLLIN)
+        except Exception:
+            poller = None
     while True:
         try:
             if _dashboard_running and _dashboard_interval > 0:
@@ -615,7 +626,12 @@ def main():
                     sensors = cmd_sensors()
                     sensors["cmd"] = "dashboard_tick"
                     print(_json.dumps(sensors))
-            ch = sys.stdin.buffer.read(1)
+            if poller is not None:
+                if not poller.poll(20):
+                    continue
+                ch = sys.stdin.buffer.read(1)
+            else:
+                ch = sys.stdin.buffer.read(1)
             if not ch:
                 time.sleep_ms(2)
                 continue
