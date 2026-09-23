@@ -608,6 +608,9 @@ _dashboard_running = True
 
 def main():
     tft_ok = tft_init()
+    if tft_ok:
+        img = cmd_show_image()
+        tft_ok = img.get("show_image") == "ok"
     print(_json.dumps({"version": "sipher-pico-main-v3", "tft": tft_ok, "ready": True}))
     buf = b""
     last_tick = time.ticks_ms()
