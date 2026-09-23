@@ -50,6 +50,22 @@ cd dashboard && npm run build
 ssh sipher@192.168.1.35 "/home/sipher/deploy/update.sh"
 ```
 
+## Desktop Application
+
+The dashboard installs as a Windows desktop app (standalone Edge window,
+auto-restarting server, startup entry). See **`dashboard/APPLICATION.md`**.
+
+```powershell
+cd dashboard
+npm install
+npm run build
+powershell -ExecutionPolicy Bypass -File .\Install-DesktopShortcut.ps1
+```
+
+> **Marcia / partners:** after cloning, run the install script above once
+> to put **Sipher Dashboard** on your Desktop too. Full steps are in
+> `dashboard/APPLICATION.md` and `marcia/README.md` (section 0).
+
 ## Architecture
 
 See `docs/ARCHITECTURE.md` for the full 6-layer architecture definition.
@@ -63,4 +79,5 @@ See `docs/ARCHITECTURE.md` for the full 6-layer architecture definition.
 | Wiring | `docs/hardware/pico-wiring.md` | Pico 2 W pin mapping and wiring |
 | Deploy | `deploy/README.md` | Auto-deploy setup |
 | Dashboard | `dashboard/README.md` | Dashboard development guide |
+| Desktop App | `dashboard/APPLICATION.md` | Install Sipher Dashboard on your PC |
 | Marcia Guide | `marcia/README.md` | Partner responsibilities and setup |

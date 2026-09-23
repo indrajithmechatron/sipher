@@ -6,6 +6,32 @@ This document tells you exactly what you own, what to touch, and what NOT to tou
 
 ## Your Responsibilities
 
+### 0. Desktop Application (install this first)
+
+**Location:** `dashboard/` — see `dashboard/APPLICATION.md`
+
+Hi Marcia — the dashboard is packaged as a Windows desktop application.
+Please install it on your machine so you always have the mission control UI:
+
+```powershell
+# 1. Clone the repo, then:
+cd sipher\dashboard
+npm install
+npm run build
+
+# 2. Create the Desktop + Startup shortcuts (run once):
+powershell -ExecutionPolicy Bypass -File .\Install-DesktopShortcut.ps1
+```
+
+After that you will see **Sipher Dashboard** on your Desktop.
+Double-click it anytime — it starts the local server if needed and opens
+the app in a standalone window (no browser tabs). The server also starts
+automatically when you log in.
+
+Full docs: `dashboard/APPLICATION.md`
+
+---
+
 ### 1. Dashboard (React + Vite)
 
 **Location:** `dashboard/`
@@ -24,6 +50,12 @@ npm run dev
 ```bash
 npm run build
 # Output goes to dashboard/dist/
+```
+
+**Desktop app install (recommended):**
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Install-DesktopShortcut.ps1
+# Details: dashboard/APPLICATION.md
 ```
 
 **Key files to know:**
