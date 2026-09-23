@@ -12,8 +12,14 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://192.168.1.35:5001",
-      "/command": "http://192.168.1.35:5001",
+      "/api": "http://192.168.1.35:8888",
+      "/command": "http://192.168.1.35:8888",
+    },
+  },
+  preview: {
+    proxy: {
+      "/api": "http://192.168.1.35:8888",
+      "/command": "http://192.168.1.35:8888",
     },
   },
 });

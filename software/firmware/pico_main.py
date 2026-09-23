@@ -275,7 +275,7 @@ def tft_init():
         _tft_cmd(0x11)
         time.sleep_ms(120)
         _tft_cmd(0x3A); _tft_data(b'\x55')
-        _tft_cmd(0x36); _tft_data(b'\x00')
+        _tft_cmd(0x36); _tft_data(b'\xE0')
         _tft_cmd(0x29)
         time.sleep_ms(50)
         return True

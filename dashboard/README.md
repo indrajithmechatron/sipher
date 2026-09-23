@@ -2,6 +2,17 @@
 
 React + Vite mission control UI for the Sipher quadruped robot.
 
+## Desktop Application
+
+Install as a desktop app (standalone window + auto-start server):
+see **[APPLICATION.md](./APPLICATION.md)**.
+
+```powershell
+npm install
+npm run build
+powershell -ExecutionPolicy Bypass -File .\Install-DesktopShortcut.ps1
+```
+
 ## Setup
 
 ```bash
