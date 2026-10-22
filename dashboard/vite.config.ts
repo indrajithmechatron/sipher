@@ -1,9 +1,12 @@
-﻿import { defineConfig, type Plugin } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import { WebSocketServer, type WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import http from "node:http";
 
 // Where /api and /command are proxied. Defaults to the robot; override with
 // SIPHER_API (e.g. a local mock) when the Pi is offline.
@@ -17,361 +20,376 @@ const CMD_TIMEOUT_MS = 10 * 60 * 1000;
 const IDLE_MS = 15 * 60 * 1000;
 const MAX_SESSIONS = 4;
 
-// Engine: prefer PowerShell 7 (pwsh) when available, else Windows PowerShell.
-// Both speak the same child-process protocol, so they are interchangeable.
-const PS_ENGINE = process.env.SIPHER_PS_ENGINE ?? "powershell.exe";
+// ---- opencode AI backend ---------------------------------------------------
+// Headless `opencode serve` process, bound to the Sipher repository as its
+// project root so chats/agents see repo files, git state and agent tools.
+// The supervisor spawns it with `npm run dev`, pings it periodically and
+// restarts it if it ever dies. The dashboard talks to it through the
+// /api/ai proxy (Basic auth injected here, never in the browser).
+const AI_PORT = Number(process.env.SIPHER_AI_PORT ?? 4096);
+const AI_PASSWORD = process.env.SIPHER_AI_PASSWORD ?? "***REMOVED***";
+const AI_REPO_ROOT = path.resolve(__dirname, "..");
 
-// The REPL runs inside one long-lived PowerShell process. Each command arrives
-// as "<token>\n<base64(cmd)>\n"; the marker line carries token, success, exit
-// code and working directory back. stdout/stderr are streamed verbatim, so the
-// dashboard sees output live (including slow pipelines).
-const REPL = `
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$ProgressPreference = 'SilentlyContinue'
-$ErrorActionPreference = 'Continue'
-Write-Output ('${READY_PREFIX}' + $PSVersionTable.PSVersion.ToString() + '|' + (Get-Location).Path)
-while ($true) {
-  $tok = [Console]::In.ReadLine()
-  if ($null -eq $tok) { break }
-  $b64 = [Console]::In.ReadLine()
-  if ($null -eq $b64) { break }
-  $cmd = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64))
-  $ok = 1
-  try {
-    $sb = [ScriptBlock]::Create($cmd)
-    . $sb *>&1 | ForEach-Object {
-      if ($_ -is [System.Management.Automation.ErrorRecord]) {
-        foreach ($ln in (($_ | Out-String).TrimEnd() -split "\\r?\\n")) { '${ERR_PREFIX}' + $ln }
-      } else { $_ }
-    } | Out-String -Stream -Width 200 | ForEach-Object { Write-Output $_ }
-  } catch {
-    $ok = 0
-    foreach ($ln in (($_ | Out-String).TrimEnd() -split "\\r?\\n")) { '${ERR_PREFIX}' + $ln }
-  }
-  $ec = 0
-  if ($null -ne $LASTEXITCODE) { $ec = [int]$LASTEXITCODE }
-  Write-Output ('${DONE_PREFIX}' + $tok + '|' + $ok + '|' + $ec + '|' + (Get-Location).Path)
+const AI_AUTH = "Basic " + Buffer.from(`opencode:${AI_PASSWORD}`).toString("base64");
+
+function resolveOpencodeBin(): string {
+  const custom = process.env.SIPHER_OPENCODE_BIN;
+  if (custom && existsSync(custom)) return custom;
+  const npmGlobal = path.join(
+    process.env.APPDATA ?? "",
+    "npm",
+    "node_modules",
+    "opencode-windows-x64",
+    "bin",
+    "opencode.exe",
+  );
+  if (existsSync(npmGlobal)) return npmGlobal;
+  return "opencode";
 }
-`;
 
-type DoneInfo = { cwd: string; ok: boolean; code: number };
-type Pending = {
-  tok: string;
-  onChunk: (s: string) => void;
-  onErr: (s: string) => void;
-  resolve: (d: DoneInfo) => void;
-  outBuf: string;
-  errBuf: string;
-  timer: NodeJS.Timeout;
-};
-
-type PsSession = {
-  child: ChildProcessWithoutNullStreams;
-  version: string;
-  cwd: string;
-  ready: boolean;
-  pending: Pending | null;
-  lastUsed: number;
-  alive: boolean;
-};
-
-function powershellApi(): Plugin {
-  const sessions = new Map<string, PsSession>();
-
-  const destroy = (id: string) => {
-    const s = sessions.get(id);
-    if (!s) return;
-    s.alive = false;
-    try {
-      s.child.kill();
-    } catch {}
-    sessions.delete(id);
-  };
-
-  const create = (id: string): PsSession => {
-    const child = spawn(
-      PS_ENGINE,
-      [
-        "-NoLogo",
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-OutputFormat",
-        "Text",
-        "-EncodedCommand",
-        Buffer.from(REPL, "utf16le").toString("base64"),
-      ],
-      { windowsHide: true },
+function aiAlive(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.get(
+      { host: "127.0.0.1", port: AI_PORT, path: "/global/health", headers: { Authorization: AI_AUTH }, timeout: 2000 },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode === 200);
+      },
     );
-    const s: PsSession = {
-      child,
-      version: "?",
-      cwd: process.env.SIPHER_PS_CWD ?? path.resolve(__dirname, ".."),
-      ready: false,
-      pending: null,
-      lastUsed: Date.now(),
-      alive: true,
-    };
-    sessions.set(id, s);
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.on("error", () => resolve(false));
+  });
+}
 
-    const feed = (buf: Buffer, which: "out" | "err") => {
+function opencodeSupervisor(): Plugin {
+  let child: ChildProcess | null = null;
+  let launching = false;
+  const bin = resolveOpencodeBin();
+
+  const ensure = async (): Promise<boolean> => {
+    if (await aiAlive()) return true;
+    if (launching) return false;
+    launching = true;
+    if (child) {
       try {
-        const text = buf.toString("utf8");
-        const p = s.pending;
-        if (!p) {
-          if (which === "out") {
-            const at = text.indexOf(READY_PREFIX);
-            if (at >= 0) {
-              const line = text.slice(at + READY_PREFIX.length).split(/\r?\n/)[0] ?? "";
-              const cut = line.indexOf("|");
-              if (cut > 0) {
-                s.version = line.slice(0, cut).trim();
-                s.cwd = line.slice(cut + 1).trim();
-                s.ready = true;
-              }
-            }
-          }
-          return;
-        }
-      if (which === "out") {
-        p.outBuf += text;
-        let idx = p.outBuf.indexOf(DONE_PREFIX);
-        if (idx === -1) {
-          p.onChunk(text);
-          p.outBuf = "";
-          return;
-        }
-        // Marker found: everything before it is still live output.
-        const before = p.outBuf.slice(0, idx);
-        const lineEnd = p.outBuf.indexOf("\n", idx);
-        if (lineEnd === -1) {
-          // Partial marker line — keep it buffered, emit the rest.
-          if (before) p.onChunk(before);
-          p.outBuf = p.outBuf.slice(idx);
-          return;
-        }
-        const line = p.outBuf.slice(idx, lineEnd).replace(/\r/g, "");
-        const after = p.outBuf.slice(lineEnd + 1);
-        const m = line.match(/^__SIPHER_DONE__\|([^|]+)\|(\d)\|(-?\d+)\|(.*)$/);
-        if (before) p.onChunk(before);
-        if (after) p.onChunk(after);
-        p.outBuf = "";
-        s.pending = null;
-        clearTimeout(p.timer);
-        s.lastUsed = Date.now();
-        if (m && m[1] === p.tok) {
-          s.cwd = m[4].trim();
-          p.resolve({ cwd: s.cwd, ok: m[2] === "1", code: Number(m[3]) });
-        } else {
-          p.resolve({ cwd: s.cwd, ok: false, code: -1 });
-        }
-      } else {
-        p.onErr(text);
-      }
-      } catch (e) {
-        // Never let a parse hiccup take the dev server down.
-        console.error("[ps] stream parse error:", e);
-        const pend = s.pending;
-        if (pend) {
-          s.pending = null;
-          clearTimeout(pend.timer);
-          pend.resolve({ cwd: s.cwd, ok: false, code: -1 });
-        }
-      }
-    };
-
-    child.stdout.on("data", (b: Buffer) => feed(b, "out"));
-    child.stderr.on("data", (b: Buffer) => feed(b, "err"));
-    child.on("exit", () => {
-      s.alive = false;
-      const p = s.pending;
-      s.pending = null;
-      if (p) {
-        clearTimeout(p.timer);
-        p.resolve({ cwd: s.cwd, ok: false, code: -1 });
-      }
-      sessions.delete(id);
+        child.kill();
+      } catch {}
+      child = null;
+    }
+    child = spawn(bin, ["serve", "--port", String(AI_PORT)], {
+      cwd: AI_REPO_ROOT,
+      env: { ...process.env, OPENCODE_SERVER_PASSWORD: AI_PASSWORD },
+      windowsHide: true,
+      shell: !bin.endsWith(".exe") && !bin.includes("node_modules"),
     });
     child.on("error", () => {
-      s.alive = false;
-      sessions.delete(id);
+      child = null;
     });
+    child.on("exit", () => {
+      child = null;
+    });
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      if (await aiAlive()) break;
+    }
+    launching = false;
+    return await aiAlive();
+  };
+
+  return {
+    name: "sipher-opencode",
+    async configureServer(server) {
+      // Explicit starter endpoint — the chat panel hits it on mount.
+      server.middlewares.use("/api/ai/start", (req, res) => {
+        void ensure().then((up) => {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: up }));
+        });
+      });
+      const t = setInterval(() => {
+        void ensure();
+      }, 30_000);
+      t.unref?.();
+      await ensure();
+    },
+    async configurePreviewServer(server) {
+      const t = setInterval(() => {
+        void ensure();
+      }, 30_000);
+      t.unref?.();
+      await ensure();
+    },
+  };
+}
+
+// Engine: prefer PowerShell 7 (pwsh) when available, else Windows PowerShell.
+const PS_ENGINE = process.env.SIPHER_PS_ENGINE ?? "powershell.exe";
+const PS_ARGS = ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass"];
+
+// A real pseudo-console (ConPTY) per browser view, bridged over WebSocket.
+// Unlike the old stdin/stdout REPL this runs a genuine console, so PSReadLine
+// gives syntax colouring, tab completion, history, Read-Host and full-screen
+// console apps. Output is retained in a ring buffer so a remount (tab switch,
+// detach, reload) reattaches with scrollback instead of losing the session.
+const PTY_IDLE_MS = 10 * 60 * 1000;
+const PTY_MAX = 4;
+const PTY_BUF = 256 * 1024;
+
+type PtySession = {
+  id: string;
+  term: import("node-pty").IPty;
+  // One shell, many views: the dock and a detached window can watch the same
+  // console at once (input from either goes to the same PTY).
+  clients: Set<import("ws").WebSocket>;
+  buf: string;
+  cwd: string;
+  cols: number;
+  rows: number;
+  lastUsed: number;
+};
+
+function trimRing(s: string): string {
+  if (s.length <= PTY_BUF) return s;
+  const from = s.length - PTY_BUF;
+  const cut = s.indexOf("\n", from);
+  return s.slice(cut >= 0 ? cut + 1 : from);
+}
+
+function powershellPty(): Plugin {
+  const sessions = new Map<string, PtySession>();
+  let ptyMod: Promise<any> | null = null;
+
+  // Loaded lazily: `vite build` must not require the native addon.
+  const loadPty = () =>
+    (ptyMod ??= import("node-pty")
+      .then((m: any) => (typeof m.spawn === "function" ? m : m.default))
+      .catch((e) => {
+        console.error("[ps] node-pty unavailable:", e?.message ?? e);
+        return null;
+      }));
+
+  const send = (ws: import("ws").WebSocket, msg: unknown) => {
+    if (ws.readyState !== 1) return;
+    try {
+      ws.send(JSON.stringify(msg));
+    } catch {}
+  };
+
+  const broadcast = (s: PtySession, msg: unknown) => {
+    for (const c of s.clients) send(c, msg);
+  };
+
+  const hello = (s: PtySession, ws: import("ws").WebSocket, fresh: boolean) => {
+    send(ws, {
+      type: "hello",
+      session: s.id,
+      fresh,
+      shell: PS_ENGINE,
+      cwd: s.cwd,
+      cols: s.cols,
+      rows: s.rows,
+    });
+    if (!fresh && s.buf) send(ws, { type: "data", data: s.buf });
+  };
+
+  // Wire a fresh console into a session. The session object stays stable so a
+  // reset (or reattach) never orphans the views already attached to it.
+  const wire = (pty: any, s: PtySession) => {
+    const term = pty.spawn(PS_ENGINE, PS_ARGS, {
+      name: "xterm-256color",
+      cols: s.cols,
+      rows: s.rows,
+      cwd: s.cwd,
+      env: { ...process.env, TERM: "xterm-256color", TERM_PROGRAM: "sipher-dashboard" },
+    });
+    s.term = term;
+    term.onData((d: string) => {
+      s.lastUsed = Date.now();
+      s.buf = trimRing(s.buf + d);
+      broadcast(s, { type: "data", data: d });
+    });
+    term.onExit(({ exitCode }: { exitCode: number }) => {
+      if (s.term !== term) return;
+      if (sessions.get(s.id) === s) sessions.delete(s.id);
+      broadcast(s, { type: "exit", code: exitCode });
+    });
+  };
+
+  const kill = (s: PtySession) => {
+    if (sessions.get(s.id) === s) sessions.delete(s.id);
+    const term = s.term;
+    s.term = null as any;
+    for (const c of s.clients) {
+      try {
+        c.close(1000, "session closed");
+      } catch {}
+    }
+    s.clients.clear();
+    try {
+      term?.kill();
+    } catch {}
+  };
+
+  const spawnSession = (pty: any, id: string, cols: number, rows: number): PtySession => {
+    const s: PtySession = {
+      id,
+      term: null as any,
+      clients: new Set(),
+      buf: "",
+      cwd: process.env.SIPHER_PS_CWD ?? path.resolve(__dirname, ".."),
+      cols,
+      rows,
+      lastUsed: Date.now(),
+    };
+    sessions.set(id, s);
+    wire(pty, s);
     return s;
+  };
+
+  const restart = (pty: any, s: PtySession) => {
+    const old = s.term;
+    s.term = null as any;
+    try {
+      old?.kill();
+    } catch {}
+    s.buf = "";
+    s.lastUsed = Date.now();
+    wire(pty, s);
+    for (const c of s.clients) hello(s, c, true);
   };
 
   const gc = setInterval(() => {
     const now = Date.now();
-    for (const [id, s] of sessions) {
-      if (!s.pending && now - s.lastUsed > IDLE_MS) destroy(id);
+    for (const s of [...sessions.values()]) {
+      if (s.clients.size === 0 && now - s.lastUsed > PTY_IDLE_MS) kill(s);
     }
-    if (sessions.size > MAX_SESSIONS) {
-      const oldest = [...sessions.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-      if (oldest) destroy(oldest[0]);
+    while (sessions.size > PTY_MAX) {
+      const idle = [...sessions.values()]
+        .filter((s) => s.clients.size === 0)
+        .sort((a, b) => a.lastUsed - b.lastUsed)[0];
+      if (!idle) break;
+      kill(idle);
     }
   }, 60_000);
   gc.unref?.();
 
+  function onConnection(pty: any, ws: import("ws").WebSocket, u: URL) {
+    const wanted = (u.searchParams.get("session") ?? "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+    const id = wanted || randomUUID();
+    const existing = sessions.get(id);
+    const s = existing ?? spawnSession(pty, id, 120, 30);
+
+    s.clients.add(ws);
+    s.lastUsed = Date.now();
+    hello(s, ws, !existing);
+
+    ws.on("message", (raw) => {
+      s.lastUsed = Date.now();
+      let m: any;
+      try {
+        m = JSON.parse(String(raw));
+      } catch {
+        return;
+      }
+      if (m.type === "in" && typeof m.data === "string") {
+        try {
+          s.term.write(m.data);
+        } catch {}
+      } else if (m.type === "resize") {
+        const cols = Math.round(Number(m.cols));
+        const rows = Math.round(Number(m.rows));
+        if (!Number.isFinite(cols) || !Number.isFinite(rows) || cols < 20 || rows < 5 || cols > 500 || rows > 300) return;
+        s.cols = cols;
+        s.rows = rows;
+        try {
+          s.term.resize(cols, rows);
+        } catch {}
+      } else if (m.type === "reset") {
+        restart(pty, s);
+      }
+    });
+
+    const detach = () => {
+      s.clients.delete(ws);
+      s.lastUsed = Date.now();
+    };
+    ws.on("close", detach);
+    ws.on("error", detach);
+  }
+
+
+  function attach(server: { httpServer: http.Server | null }, wss: WebSocketServer) {
+    const httpServer = server.httpServer;
+    if (!httpServer) return;
+    httpServer.on("upgrade", (req, socket, head) => {
+      const u = new URL(req.url ?? "/", "http://localhost");
+      if (u.pathname !== "/api/pty") return;
+      if (!LOOPBACK.test(req.socket.remoteAddress ?? "")) {
+        socket.destroy();
+        return;
+      }
+      void loadPty().then((pty) => {
+        if (!pty) {
+          socket.write(
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nnode-pty is not installed",
+          );
+          socket.destroy();
+          return;
+        }
+        wss.handleUpgrade(req, socket, head, (ws) => onConnection(pty, ws, u));
+      });
+    });
+    httpServer.on("close", () => {
+      for (const s of [...sessions.values()]) kill(s);
+    });
+  }
+
+  // Loopback-only diagnostics: full scrollback for a session (the browser only
+  // renders the visible rows, so tests and debugging read the ring buffer).
+  const bufferRoute = (server: { middlewares: { use: (fn: any) => void } }) => {
+    server.middlewares.use((req: any, res: any, next: () => void) => {
+      const u = new URL(req.url ?? "/", "http://localhost");
+      if (u.pathname !== "/api/pty/buf") return next();
+      if (!LOOPBACK.test(req.socket.remoteAddress ?? "")) {
+        res.statusCode = 403;
+        return res.end("loopback only");
+      }
+      const s = sessions.get(u.searchParams.get("session") ?? "");
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          ok: !!s,
+          sessions: [...sessions.keys()],
+          attached: (s?.clients.size ?? 0) > 0,
+          cols: s?.cols,
+          rows: s?.rows,
+          buf: s?.buf ?? "",
+        }),
+      );
+    });
+  };
+
   return {
     name: "sipher-powershell",
     configureServer(server) {
-      server.middlewares.use("/api/ps", (req, res) => {
-        const url = (req.url ?? "").split("?")[0];
-        const json = (code: number, obj: unknown) => {
-          res.statusCode = code;
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify(obj));
-        };
-        if (!LOOPBACK.test(req.socket.remoteAddress ?? ""))
-          return json(403, { ok: false, err: "powershell runner is loopback-only" });
-
-        if (url === "/reset") {
-          if (req.method !== "POST") return json(405, { ok: false, err: "POST only" });
-          let body = "";
-          req.on("data", (c: Buffer) => (body += c));
-          req.on("end", () => {
-            let id = "";
-            try {
-              id = String(JSON.parse(body).session ?? "");
-            } catch {}
-            if (id) destroy(id);
-            json(200, { ok: true, reset: true });
-          });
-          return;
-        }
-
-        if (req.method !== "POST") return json(405, { ok: false, err: "POST {cmd, session} only" });
-        let body = "";
-        req.on("data", (c: Buffer) => {
-          body += c;
-          if (body.length > 64_000) req.destroy();
-        });
-        req.on("end", () => {
-          let cmd = "";
-          let id = "";
-          try {
-            const j = JSON.parse(body);
-            cmd = String(j.cmd ?? "");
-            id = String(j.session ?? "");
-          } catch {
-            return json(400, { ok: false, err: "invalid json" });
-          }
-          if (!id) id = randomUUID();
-          if (!cmd.trim()) return json(400, { ok: false, err: "empty command" });
-
-          const stream = (req.headers.accept ?? "").includes("text/event-stream");
-          if (stream) {
-            res.statusCode = 200;
-            res.setHeader("Content-Type", "text/event-stream");
-            res.setHeader("Cache-Control", "no-cache, no-transform");
-            res.setHeader("Connection", "keep-alive");
-            res.setHeader("X-Accel-Buffering", "no");
-            res.flushHeaders?.();
-          }
-          const send = (obj: unknown) => {
-            if (stream) res.write(`data: ${JSON.stringify(obj)}\n\n`);
-          };
-          if (!stream) res.setHeader("Content-Type", "application/json");
-
-          let s = sessions.get(id);
-          const fresh = !s || !s.alive;
-          if (fresh) s = create(id);
-          const sess = s as PsSession;
-
-          const run = () => {
-            if (!sess.alive) {
-              if (stream) {
-                send({ error: "powershell session died" });
-                res.end();
-              } else json(500, { ok: false, err: "powershell session died" });
-              return;
-            }
-            if (sess.pending) {
-              if (stream) {
-                send({ error: "busy: one command at a time" });
-                res.end();
-              } else json(409, { ok: false, err: "busy" });
-              return;
-            }
-            const tok = randomUUID();
-            let accOut = "";
-            let accErr = "";
-            const pending: Pending = {
-              tok,
-              outBuf: "",
-              errBuf: "",
-              onChunk: (text) => {
-                if (stream) send({ chunk: text });
-                else accOut += text;
-              },
-              onErr: (text) => {
-                if (stream) send({ err: text });
-                else accErr += text;
-              },
-              resolve: (d) => {
-                if (stream) {
-                  send({ done: true, cwd: d.cwd, ok: d.ok, code: d.code, session: id });
-                  res.end();
-                } else {
-                  json(200, {
-                    ok: d.ok,
-                    out: accOut.replace(/\r/g, "").replace(/\n+$/, ""),
-                    err: accErr.replace(/\r/g, "").replace(/\n+$/, ""),
-                    code: d.code,
-                    cwd: d.cwd,
-                    session: id,
-                  });
-                }
-              },
-              timer: setTimeout(() => {
-                destroy(id);
-                if (stream) {
-                  send({ error: "command exceeded 10 min — session reset" });
-                  res.end();
-                }
-              }, CMD_TIMEOUT_MS),
-            };
-            sess.pending = pending;
-            if (stream && fresh) send({ ready: true, engine: "Windows PowerShell", version: sess.version || "5.1" });
-            sess.child.stdin.write(`${tok}\n${Buffer.from(cmd, "utf8").toString("base64")}\n`);
-          };
-
-          // New sessions need the READY marker before the first command.
-          if (fresh && !sess.ready) {
-            const wait = setInterval(() => {
-              if (!sess.alive) {
-                clearInterval(wait);
-                if (stream) {
-                  send({ error: "powershell failed to start" });
-                  res.end();
-                } else json(500, { ok: false, err: "powershell failed to start" });
-                return;
-              }
-              if (sess.ready) {
-                clearInterval(wait);
-                run();
-              }
-            }, 25);
-            setTimeout(() => {
-              clearInterval(wait);
-              if (!sess.ready && sess.alive && !sess.pending) {
-                destroy(id);
-                if (stream) {
-                  send({ error: "powershell readiness timeout" });
-                  res.end();
-                } else json(500, { ok: false, err: "powershell readiness timeout" });
-              }
-            }, 10_000);
-          } else {
-            run();
-          }
-        });
-      });
+      const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+      void loadPty();
+      attach(server, wss);
+      bufferRoute(server);
+    },
+    configurePreviewServer(server) {
+      const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+      void loadPty();
+      attach(server, wss);
     },
   };
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), powershellApi()],
+  plugins: [react(), tailwindcss(), powershellPty(), opencodeSupervisor()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -383,12 +401,43 @@ export default defineConfig({
     proxy: {
       "/api": { target: api, timeout: 3000, proxyTimeout: 3000 },
       "/command": { target: api, timeout: 5000, proxyTimeout: 5000 },
+      "/api/ai": {
+        target: `http://127.0.0.1:${AI_PORT}`,
+        rewrite: (p) => p.replace(/^\/api\/ai/, ""),
+        timeout: 600_000,
+        proxyTimeout: 600_000,
+        ws: false,
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq) => {
+            proxyReq.setHeader("Authorization", AI_AUTH);
+          });
+          proxy.on("error", (_e, _req, res) => {
+            if (res && !res.headersSent) {
+              res.statusCode = 503;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ ok: false, err: "opencode backend down" }));
+            }
+          });
+        },
+      },
     },
   },
   preview: {
     proxy: {
       "/api": { target: api, timeout: 3000, proxyTimeout: 3000 },
       "/command": { target: api, timeout: 5000, proxyTimeout: 5000 },
+      "/api/ai": {
+        target: `http://127.0.0.1:${AI_PORT}`,
+        rewrite: (p) => p.replace(/^\/api\/ai/, ""),
+        timeout: 600_000,
+        proxyTimeout: 600_000,
+        ws: false,
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq) => {
+            proxyReq.setHeader("Authorization", AI_AUTH);
+          });
+        },
+      },
     },
   },
 });

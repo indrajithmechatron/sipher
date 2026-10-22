@@ -32,3 +32,5 @@ dist/
 # OS
 Thumbs.db
 .DS_Store
+# Dashboard launcher
+dashboard/.deps-stamp

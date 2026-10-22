@@ -227,8 +227,9 @@ export const TERMINALS = [
   { id: "sensors", title: "sensors", host: "pico-2w" },
   { id: "commands", title: "commands", host: "pi-bridge" },
   { id: "agent", title: "agent-trace", host: "sipher" },
+  { id: "ai", title: "ai-chat", host: "opencode · repo" },
   { id: "problems", title: "Problems", host: "" },
-  { id: "powershell", title: "powershell", host: "local · win32" },
+  { id: "powershell", title: "powershell", host: "local · win32 · conpty" },
 ];
 
 export const TERMINAL_LINES: Record<string, { c: string; text: string }[]> = {
