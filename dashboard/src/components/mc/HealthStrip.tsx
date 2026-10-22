@@ -40,9 +40,11 @@ export function HealthStrip({
   onCommand: () => void;
 }) {
   const warnings = tele.agents.filter((a) => a.state === "escalated" || a.state === "failed").length;
-  const battTone = tele.battery < 20 ? "danger" : tele.battery < 40 ? "warn" : "ok";
-  const tempTone = tele.tempCore > 65 ? "danger" : tele.tempCore > 55 ? "warn" : "ok";
-  const loopTone = tele.loopHz < 380 ? "warn" : "ok";
+  const battTone =
+    tele.battery == null ? "muted" : tele.battery < 20 ? "danger" : tele.battery < 40 ? "warn" : "ok";
+  const tempTone =
+    tele.tempCore == null ? "muted" : tele.tempCore > 65 ? "danger" : tele.tempCore > 55 ? "warn" : "ok";
+  const loopTone = tele.loopHz == null || tele.loopHz < 1 ? "warn" : "ok";
 
   return (
     <footer className="hairline-t flex h-7 shrink-0 items-center gap-4 overflow-x-auto bg-rail px-3 font-mono text-[10px] text-muted-foreground select-none">
@@ -71,16 +73,43 @@ export function HealthStrip({
         value={tele.picoAgeMs != null ? `${tele.picoAgeMs} ms` : "—"}
         tone={tele.picoAgeMs != null && tele.picoAgeMs < 2000 ? "ok" : "warn"}
       />
-      <Metric icon={Gauge} label="loop" value={`${tele.loopHz} Hz`} tone={loopTone} />
-      <Metric icon={Cpu} label="infer" value={`${tele.inferenceMs.toFixed(1)} ms`} />
+      <Metric
+        icon={Gauge}
+        label="loop"
+        value={tele.loopHz != null ? `${tele.loopHz} Hz` : "—"}
+        tone={loopTone}
+      />
+      <Metric
+        icon={Cpu}
+        label="cpu"
+        value={tele.cpu != null ? `${tele.cpu.toFixed(0)} %` : "—"}
+        tone={tele.cpu == null ? "muted" : tele.cpu > 90 ? "warn" : "ok"}
+      />
       <Metric
         icon={BatteryMedium}
         label="batt"
-        value={`${tele.battery.toFixed(0)}% · ${tele.minutes}m`}
+        value={
+          tele.battery != null
+            ? `${tele.battery.toFixed(0)}%${tele.minutes != null ? ` · ${tele.minutes}m` : ""}`
+            : "—"
+        }
         tone={battTone}
       />
-      <Metric label="core" value={`${tele.tempCore.toFixed(1)} C`} tone={tempTone} />
-      <Metric label="motor" value={`${tele.tempMotor.toFixed(1)}°C`} tone={tele.tempMotor > 75 ? "warn" : "muted"} />
+      <Metric
+        icon={Thermometer}
+        label="core"
+        value={tele.tempCore != null ? `${tele.tempCore.toFixed(1)} C` : "—"}
+        tone={tempTone}
+      />
+      <Metric
+        label="bus"
+        value={
+          tele.bus != null
+            ? `${tele.bus.toFixed(2)} V${tele.currentMa != null ? ` · ${tele.currentMa.toFixed(0)} mA` : ""}`
+            : "—"
+        }
+        tone={tele.bus == null ? "muted" : "ok"}
+      />
       <Metric
         label="mission"
         value={`${tele.mission.name} ${tele.mission.step}/${tele.mission.total} ${tele.mission.state}`}

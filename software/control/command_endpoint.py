@@ -30,7 +30,9 @@ PICO_SERIAL = os.environ.get("SIPHER_PICO_SERIAL", "/dev/ttyACM0")
 PICO_BAUD = int(os.environ.get("SIPHER_PICO_BAUD", "115200"))
 REPO_DIR = os.environ.get("SIPHER_REPO_DIR", "/home/sipher/sipher")
 BRIDGE_SENSOR_URL = os.environ.get("SIPHER_BRIDGE_SENSOR_URL", "http://localhost:5001/sensor")
+BRIDGE_MAP_URL = os.environ.get("SIPHER_BRIDGE_MAP_URL", "http://localhost:5001/map")
 BRIDGE_CMD_URL = os.environ.get("SIPHER_BRIDGE_CMD_URL", "http://localhost:5001/api/bridge_cmd")
+
 _THIS_DIR = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
 DASHBOARD_PATH = _THIS_DIR.parent / "dashboard" / "index.html"
 
@@ -41,8 +43,110 @@ _latest_sensor = {}
 _sensor_meta = {"pico_live": False, "pico_age_ms": None, "bridge_ok": False}
 _sensor_lock = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# Pi host stats — real readings, refreshed by the poller thread
+# ---------------------------------------------------------------------------
+_pi_stats = {"cpu_pct": None, "cpu_temp_c": None, "load1": None, "load5": None,
+             "load15": None, "mem_used_pct": None, "mem_free_mb": None,
+             "disk_used_pct": None, "uptime_s": None, "cores": None}
+_cpu_prev = {}
+
+def _read_float(path):
+    try:
+        with open(path) as f:
+            return float(f.read().strip())
+    except Exception:
+        return None
+
+def _cpu_temp_c():
+    t = _read_float("/sys/class/thermal/thermal_zone0/temp")
+    if t is None:
+        # some kernels expose the sensor under hwmon only
+        for i in range(4):
+            t = _read_float(f"/sys/class/hwmon/hwmon{i}/temp1_input")
+            if t is not None:
+                break
+    return round(t / 1000.0, 1) if t is not None else None
+
+def _cpu_pct():
+    """CPU utilisation from /proc/stat deltas between two poller samples."""
+    global _cpu_prev
+    try:
+        with open("/proc/stat") as f:
+            parts = f.readline().split()
+        idle = int(parts[4]) + int(parts[5])
+        total = sum(int(x) for x in parts[1:])
+    except Exception:
+        return None
+    prev = _cpu_prev
+    _cpu_prev = {"idle": idle, "total": total}
+    if not prev or total <= prev["total"]:
+        return None
+    d_total = total - prev["total"]
+    d_idle = idle - prev["idle"]
+    return round(max(0.0, min(100.0, (1 - d_idle / d_total) * 100.0)), 1)
+
+def _mem_stats():
+    info = {}
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                k, v = line.split(":", 1)
+                info[k] = int(v.strip().split()[0])   # kB
+    except Exception:
+        return None, None
+    total = info.get("MemTotal")
+    if not total:
+        return None, None
+    avail = info.get("MemAvailable", info.get("MemFree", 0))
+    used_pct = round((total - avail) / total * 100.0, 1)
+    return used_pct, round(avail / 1024.0, 0)
+
+def _disk_used_pct():
+    try:
+        st = os.statvfs("/")
+        used = (st.f_blocks - st.f_bfree) * st.f_frsize
+        total = st.f_blocks * st.f_frsize
+        return round(used / total * 100.0, 1) if total else None
+    except Exception:
+        return None
+
+def _uptime_s():
+    try:
+        with open("/proc/uptime") as f:
+            return int(float(f.read().split()[0]))
+    except Exception:
+        return None
+
+def _loadavg():
+    try:
+        with open("/proc/loadavg") as f:
+            a = f.read().split()
+        return round(float(a[0]), 2), round(float(a[1]), 2), round(float(a[2]), 2)
+    except Exception:
+        return None, None, None
+
+def refresh_pi_stats():
+    l1, l5, l15 = _loadavg()
+    used, free = _mem_stats()
+    stats = {
+        "cpu_pct": _cpu_pct(),
+        "cpu_temp_c": _cpu_temp_c(),
+        "load1": l1, "load5": l5, "load15": l15,
+        "mem_used_pct": used, "mem_free_mb": free,
+        "disk_used_pct": _disk_used_pct(),
+        "uptime_s": _uptime_s(),
+        "cores": os.cpu_count(),
+        "ts": time.time(),
+    }
+    _pi_stats.update({k: v for k, v in stats.items() if v is not None})
+    return stats
+
+def get_pi_stats():
+    return dict(_pi_stats)
+
 def _sensor_poller():
-    """Poll bridge /sensor endpoint every 1s for latest snapshot."""
+    """Poll bridge /sensor endpoint every 1s for latest snapshot + Pi host stats."""
     while True:
         try:
             with urllib.request.urlopen(BRIDGE_SENSOR_URL, timeout=3) as resp:
@@ -60,6 +164,10 @@ def _sensor_poller():
         except Exception:
             with _sensor_lock:
                 _sensor_meta["bridge_ok"] = False
+        try:
+            refresh_pi_stats()
+        except Exception:
+            pass
         time.sleep(1)
 
 def get_latest_sensor():
@@ -71,9 +179,11 @@ def get_latest_sensor():
         "pico": meta.get("pico_live", False),
         "pico_age_ms": meta.get("pico_age_ms"),
         "bridge": meta.get("bridge_ok", False),
+        "pi_stats": get_pi_stats(),
         "ts": time.time(),
     }
     return data
+
 
 _sensor_thread = threading.Thread(target=_sensor_poller, daemon=True)
 _sensor_thread.start()
@@ -82,11 +192,14 @@ _sensor_thread.start()
 # Dashboard HTML — loaded from file
 # ---------------------------------------------------------------------------
 _dashboard_html = None
+_dashboard_dir = None
 
 def load_dashboard():
-    global _dashboard_html
-    # Try multiple paths
+    global _dashboard_html, _dashboard_dir
+    # Try multiple paths (built Vite bundle first)
     candidates = [
+        pathlib.Path(REPO_DIR) / "dashboard" / "dist" / "index.html",
+        pathlib.Path(REPO_DIR) / "dashboard" / "index.html",
         _THIS_DIR.parent / "dashboard" / "index.html",
         pathlib.Path(REPO_DIR) / "software" / "dashboard" / "index.html",
         pathlib.Path("/home/sipher/sipher/software/dashboard/index.html"),
@@ -94,6 +207,7 @@ def load_dashboard():
     for p in candidates:
         if p.exists():
             _dashboard_html = p.read_text(encoding="utf-8")
+            _dashboard_dir = p.parent
             print(f"[http] loaded dashboard from {p}", flush=True)
             return
     _dashboard_html = "<h1>Dashboard not found</h1><p>Searched: " + "<br>".join(str(p) for p in candidates) + "</p>"
@@ -156,6 +270,33 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_asset(self, path):
+        """Serve built dashboard assets (/assets/*)."""
+        if not _dashboard_dir:
+            self.send_json({"error": "dashboard not loaded"}, 500)
+            return
+        rel = path[len("/assets/"):]
+        target = (_dashboard_dir / "assets" / rel).resolve()
+        base = _dashboard_dir.resolve()
+        if not str(target).startswith(str(base) + os.sep) or not target.is_file():
+            self.send_json({"error": "not found"}, 404)
+            return
+        ctype = {
+            ".js": "application/javascript; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".map": "application/json",
+            ".svg": "image/svg+xml",
+            ".png": "image/png",
+            ".woff2": "font/woff2",
+        }.get(target.suffix.lower(), "application/octet-stream")
+        data = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -171,6 +312,10 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({"error": "dashboard not loaded"}, 500)
         elif self.path == "/api/sensors":
             self.send_json(get_latest_sensor())
+        elif self.path == "/api/pi":
+            self.send_json(get_pi_stats())
+        elif self.path.startswith("/api/map"):
+            self.handle_map()
         elif self.path == "/api/info":
             uptime = "unknown"
             try:
@@ -188,6 +333,8 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
             })
         elif self.path == "/health":
             self.send_json({"status": "ok"})
+        elif self.path.startswith("/assets/"):
+            self.send_asset(self.path.split("?", 1)[0])
         else:
             self.send_json({"error": "not found"}, 404)
 
@@ -198,6 +345,28 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
             self.handle_bridge_cmd()
         else:
             self.send_json({"error": "not found"}, 404)
+
+    def handle_map(self):
+        """Proxy occupancy-map requests to the bridge (Layer 2 owns the mapper).
+
+        GET /api/map            -> full map incl. base64 grid
+        GET /api/map?nogrid=1   -> map metadata only (cheap polling)
+        GET /api/map?action=start|stop|reset -> control the sweep
+        """
+        query = self.path.split("?", 1)[1] if "?" in self.path else ""
+        url = BRIDGE_MAP_URL + ("?" + query if query else "")
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                body = resp.read()
+                status = resp.status
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as e:
+            self.send_json({"error": f"bridge map not reachable: {e}"}, 502)
 
     def handle_bridge_cmd(self):
         """Forward a command to the bridge via TCP port 5000."""

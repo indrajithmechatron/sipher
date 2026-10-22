@@ -51,7 +51,12 @@
   --color-sidebar-border: var(--hairline);
 }
 
+/* Named UI themes: `set1` (graphite dark, default) lives in `:root`;
+ * `set2` (Pinterest-like light) lives in `[data-theme="set2"]` below.
+ * Switch via `applyTheme` in `src/components/mc/theme.ts`. */
+
 :root {
+  color-scheme: dark;
   --radius: 0.25rem;
 
   --background: oklch(0.16 0.004 260);
@@ -90,6 +95,63 @@
   --input: oklch(0.28 0.005 260);
   --ring: var(--signal-dim);
 }
+
+/* set2 — Pinterest-like light interface: white surfaces, warm gray text,
+ * light dividers, brand-red primary/signal. Rounder corners. */
+[data-theme="set2"] {
+  color-scheme: light;
+  --radius: 0.75rem;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.22 0 0);
+
+  --chrome: oklch(1 0 0);
+  --panel: oklch(1 0 0);
+  --panel-raised: oklch(0.965 0 0);
+  --rail: oklch(0.955 0 0);
+  --hairline: oklch(0.9 0 0);
+
+  --card: var(--panel);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+
+  --primary: oklch(0.55 0.22 26);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.94 0 0);
+  --secondary-foreground: oklch(0.22 0 0);
+  --muted: oklch(0.95 0 0);
+  --muted-foreground: oklch(0.56 0 0);
+  --accent: oklch(0.94 0 0);
+  --accent-foreground: oklch(0.22 0 0);
+
+  --signal: oklch(0.55 0.22 26);
+  --signal-dim: oklch(0.45 0.18 26);
+  --ok: oklch(0.6 0.15 155);
+  --warn: oklch(0.64 0.13 80);
+  --danger: oklch(0.55 0.22 26);
+  --violet: oklch(0.55 0.2 295);
+
+  --destructive: var(--danger);
+  --destructive-foreground: oklch(1 0 0);
+  --border: var(--hairline);
+  --input: oklch(0.93 0 0);
+  --ring: var(--signal-dim);
+}
+
+[data-theme="set2"] ::-webkit-scrollbar-thumb {
+  background: oklch(0.8 0 0);
+}
+[data-theme="set2"] ::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.68 0 0);
+}
+/* dark grid lines on the light theme (the default ones are white-on-dark) */
+[data-theme="set2"] .grid-field {
+  background-image:
+    linear-gradient(to right, oklch(0 0 0 / 6%) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(0 0 0 / 6%) 1px, transparent 1px);
+}
+
 
 .dark {
   color-scheme: dark;

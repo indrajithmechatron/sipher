@@ -47,9 +47,13 @@ function ContextBody({ sel, tele }: { sel: Selection; tele: Telemetry }) {
       <>
         <Section title="Joint" />
         <Field label="Name" value={joint.name} />
-        <Field label="Angle" value={`${joint.value.toFixed(2)}°`} tone="text-signal" />
-        <Field label="Target" value={`${joint.target.toFixed(2)}°`} />
-        <Field label="Load" value={`${joint.load.toFixed(0)}%`} tone={joint.load > 75 ? "text-warn" : ""} />
+        <Field label="Angle" value={joint.value != null ? `${joint.value.toFixed(2)}°` : "—"} tone="text-signal" />
+        <Field label="PWM" value={joint.pulse_us != null ? `${joint.pulse_us} us` : "—"} />
+        <Field
+          label="Load"
+          value={joint.load != null ? `${joint.load.toFixed(0)}%` : "not measured"}
+          tone={joint.load != null && joint.load > 75 ? "text-warn" : ""}
+        />
         <Field label="Controller" value="impedance · 400 Hz" />
       </>
     );
@@ -130,14 +134,14 @@ function ContextBody({ sel, tele }: { sel: Selection; tele: Telemetry }) {
       <Field label="Velocity" value={`${tele.velocity.toFixed(2)} m/s`} />
       <Field
         label="Battery"
-        value={tele.bus > 0 ? `${tele.bus.toFixed(2)} V` : "—"}
-        tone={tele.bus > 0 && tele.bus < 10 ? "text-warn" : "text-ok"}
+        value={tele.bus != null && tele.bus > 0 ? `${tele.bus.toFixed(2)} V` : "—"}
+        tone={tele.bus != null && tele.bus > 0 && tele.bus < 10 ? "text-warn" : "text-ok"}
       />
-      <Field label="Bus voltage" value={tele.bus > 0 ? `${tele.bus.toFixed(2)} V` : "—"} />
+      <Field label="Bus voltage" value={tele.bus != null && tele.bus > 0 ? `${tele.bus.toFixed(2)} V` : "—"} />
       <Field
         label="Temp (core)"
-        value={tele.tempCore > 0 ? `${tele.tempCore.toFixed(1)} C` : "—"}
-        tone={tele.tempCore > 60 ? "text-warn" : ""}
+        value={tele.tempCore != null && tele.tempCore > 0 ? `${tele.tempCore.toFixed(1)} C` : "—"}
+        tone={tele.tempCore != null && tele.tempCore > 60 ? "text-warn" : ""}
       />
       <Field
         label="ToF height"

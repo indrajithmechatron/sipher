@@ -48,7 +48,7 @@ export type TreeNode = {
   id: string;
   label: string;
   meta?: string;
-  tone?: "ok" | "warn" | "danger" | "signal";
+  tone?: "ok" | "warn" | "danger" | "signal" | "muted";
   children?: TreeNode[];
 };
 
@@ -68,9 +68,9 @@ export const EXPLORER: TreeNode[] = [
     label: "Sensors",
     children: [
       { id: "s-mpu", label: "MPU6050", meta: "I2C1 0x68", tone: "ok" },
-      { id: "s-ina", label: "INA219", meta: "I2C0 0x41", tone: "ok" },
-      { id: "s-pca", label: "PCA9685", meta: "I2C0 0x40", tone: "ok" },
-      { id: "s-vl", label: "VL53L0X", meta: "I2C0 0x29", tone: "ok" },
+      { id: "s-ina", label: "INA219", meta: "I2C1 0x41", tone: "ok" },
+      { id: "s-pca", label: "PCA9685", meta: "I2C1 0x40", tone: "ok" },
+      { id: "s-vl", label: "VL53L0X", meta: "I2C1 0x29", tone: "ok" },
       { id: "s-gps", label: "NEO-6M GPS", meta: "UART GP0/1", tone: "muted" },
     ],
   },
@@ -108,8 +108,8 @@ export const EXPLORER: TreeNode[] = [
     id: "buses",
     label: "I2C Buses",
     children: [
-      { id: "b-0", label: "I2C0 (GP8/GP9)", meta: "PCA INA VL53", tone: "ok" },
-      { id: "b-1", label: "I2C1 (GP2/GP3)", meta: "MPU6050", tone: "ok" },
+      { id: "b-0", label: "I2C0 (GP8/GP9)", meta: "empty", tone: "muted" },
+      { id: "b-1", label: "I2C1 (GP2/GP3)", meta: "VL53 PCA INA MPU", tone: "ok" },
     ],
   },
 ];
@@ -209,18 +209,18 @@ export const AGENT_EVENTS: AgentEvent[] = [
 ];
 
 export const JOINTS = [
-  { name: "FL_hip", value: -4.2, load: 34 },
-  { name: "FL_thigh", value: 41.8, load: 62 },
-  { name: "FL_calf", value: -78.3, load: 71 },
-  { name: "FR_hip", value: 3.9, load: 31 },
-  { name: "FR_thigh", value: 40.6, load: 58 },
-  { name: "FR_calf", value: -77.1, load: 69 },
-  { name: "RL_hip", value: -5.1, load: 39 },
-  { name: "RL_thigh", value: 44.2, load: 74 },
-  { name: "RL_calf", value: -80.6, load: 81 },
-  { name: "RR_hip", value: 4.4, load: 36 },
-  { name: "RR_thigh", value: 43.7, load: 66 },
-  { name: "RR_calf", value: -79.9, load: 77 },
+  { name: "FL_hip", value: -0.6, load: 34 },
+  { name: "FL_thigh", value: 60.4, load: 62 },
+  { name: "FL_calf", value: -59.6, load: 71 },
+  { name: "FR_hip", value: 0.9, load: 31 },
+  { name: "FR_thigh", value: 59.3, load: 58 },
+  { name: "FR_calf", value: -60.7, load: 69 },
+  { name: "RL_hip", value: -1.2, load: 39 },
+  { name: "RL_thigh", value: 61.2, load: 74 },
+  { name: "RL_calf", value: -58.8, load: 81 },
+  { name: "RR_hip", value: 0.7, load: 36 },
+  { name: "RR_thigh", value: 59.6, load: 66 },
+  { name: "RR_calf", value: -60.4, load: 77 },
 ];
 
 export const TERMINALS = [
@@ -228,6 +228,7 @@ export const TERMINALS = [
   { id: "commands", title: "commands", host: "pi-bridge" },
   { id: "agent", title: "agent-trace", host: "sipher" },
   { id: "problems", title: "Problems", host: "" },
+  { id: "powershell", title: "powershell", host: "local · win32" },
 ];
 
 export const TERMINAL_LINES: Record<string, { c: string; text: string }[]> = {

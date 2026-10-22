@@ -26,6 +26,14 @@ import time
 import sys
 import os
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+try:
+    from tof_mapper import TofMapper, MAP_INTERVAL_MS, IDLE_INTERVAL_MS
+except ImportError:
+    from robot.tof_mapper import TofMapper, MAP_INTERVAL_MS, IDLE_INTERVAL_MS
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -45,6 +53,7 @@ _clients_lock = threading.Lock()
 _serial = None  # shared serial connection
 _serial_lock = threading.Lock()
 _SENSOR_KEYS = ("mpu", "vl53_mm", "ina", "gps", "i2c0", "i2c1")
+_mapper = TofMapper()
 
 
 def _now():
@@ -116,6 +125,10 @@ def read_pico():
                 ):
                     with _sensor_lock:
                         _latest_sensor = data
+                    try:
+                        _mapper.feed(data)
+                    except Exception as e:
+                        print(f"[bridge] mapper feed error: {e}", flush=True)
                     print(
                         f"[bridge] rx tick mpu={bool(data.get('mpu'))} "
                         f"vl53={data.get('vl53_mm')} ina={bool(data.get('ina'))} "
@@ -246,58 +259,96 @@ def forward_to_pico(req):
         print(f"[bridge] error forwarding to Pico: {e}", flush=True)
     return False
 
+def set_pico_interval(interval_ms):
+    """Ask the Pico to tick faster (mapping sweep) or return to the idle rate."""
+    return forward_to_pico({"cmd": "dashboard", "interval_ms": int(interval_ms)})
+
+def map_action(action):
+    """start / stop / reset the occupancy mapper and retune the Pico tick rate."""
+    action = (action or "").lower()
+    if action == "start":
+        result = _mapper.start(MAP_INTERVAL_MS)
+        set_pico_interval(MAP_INTERVAL_MS)
+    elif action == "stop":
+        result = _mapper.stop()
+        set_pico_interval(IDLE_INTERVAL_MS)
+    elif action == "reset":
+        result = _mapper.reset()
+    else:
+        return {"error": f"unknown action: {action}",
+                "valid": ["start", "stop", "reset"]}
+    result["tick_interval_ms"] = MAP_INTERVAL_MS if _mapper.is_running() else IDLE_INTERVAL_MS
+    return result
+
 # ---------------------------------------------------------------------------
 # HTTP endpoint — for dashboard / simple sensor queries
 # ---------------------------------------------------------------------------
+def _http_json(conn, payload, status="200 OK"):
+    body = json.dumps(payload).encode()
+    head = (
+        f"HTTP/1.1 {status}\r\n"
+        "Content-Type: application/json\r\n"
+        f"Content-Length: {len(body)}\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "\r\n"
+    )
+    try:
+        conn.sendall(head.encode() + body)
+    except Exception:
+        pass
+
 def http_handler(conn):
-    """Simple HTTP handler for /sensor endpoint."""
+    """Simple HTTP handler for /sensor, /health and /map endpoints."""
     try:
         data = conn.recv(4096).decode()
     except Exception:
         conn.close()
         return
     request_line = data.split("\r\n")[0] if data else ""
-    if "GET /sensor" in request_line:
-        with _sensor_lock:
-            snapshot = dict(_latest_sensor)
-        snapshot["_meta"] = {
-            "pico": pico_status(),
-            "ts": _now(),
-            "serial": PICO_SERIAL,
-        }
-        body = json.dumps(snapshot).encode()
-        response = (
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: application/json\r\n"
-            f"Content-Length: {len(body)}\r\n"
-            "Access-Control-Allow-Origin: *\r\n"
-            "\r\n"
-        )
-        conn.sendall(response.encode() + body)
-    elif "GET /health" in request_line:
-        body = json.dumps({
-            "status": "ok",
-            "pico_serial": PICO_SERIAL,
-            "pico": pico_status(),
-        }).encode()
-        response = (
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: application/json\r\n"
-            f"Content-Length: {len(body)}\r\n"
-            "Access-Control-Allow-Origin: *\r\n"
-            "\r\n"
-        )
-        conn.sendall(response.encode() + body)
-    else:
-        body = b'{"error":"not found"}'
-        response = (
-            "HTTP/1.1 404 Not Found\r\n"
-            "Content-Type: application/json\r\n"
-            f"Content-Length: {len(body)}\r\n"
-            "\r\n"
-        )
-        conn.sendall(response.encode() + body)
-    conn.close()
+    try:
+        path = request_line.split(" ")[1] if " " in request_line else ""
+    except Exception:
+        path = ""
+    try:
+        if path.startswith("/map"):
+            query = path.split("?", 1)[1] if "?" in path else ""
+            action = None
+            for part in query.split("&"):
+                if part.startswith("action="):
+                    action = part.split("=", 1)[1]
+            if action:
+                _http_json(conn, map_action(action))
+            else:
+                _http_json(conn, _mapper.state(include_grid="nogrid" not in query))
+        elif path.startswith("/sensor"):
+            with _sensor_lock:
+                snapshot = dict(_latest_sensor)
+            # Ensure _meta has pico as boolean and pico_age_ms for dashboard
+            _meta = snapshot.get("_meta", {})
+            pico_data = _meta.get("pico")
+            if isinstance(pico_data, dict):
+                _meta["pico"] = pico_data.get("live", False)
+            elif not isinstance(pico_data, bool):
+                _meta["pico"] = False
+            _meta.setdefault("pico_age_ms", None)
+            _meta["bridge"] = True
+            _meta["ts"] = _meta.get("ts", _now())
+            snapshot["_meta"] = _meta
+            _http_json(conn, snapshot)
+        elif path.startswith("/health"):
+            _http_json(conn, {
+                "status": "ok",
+                "pico_serial": PICO_SERIAL,
+                "pico": pico_status(),
+                "mapping": _mapper.is_running(),
+            })
+        else:
+            _http_json(conn, {"error": "not found"}, "404 Not Found")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 def http_server():
     """Simple HTTP server for /sensor and /health endpoints."""

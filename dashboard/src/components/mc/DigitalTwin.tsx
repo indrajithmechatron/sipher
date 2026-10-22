@@ -1,54 +1,80 @@
-import { useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chrome";
 import type { Telemetry } from "./sipher";
+import { VIEWBOX, VIEWS, buildScene, legsFromJoints, renderScene } from "./sipher3d";
+import type { Shading, View } from "./sipher3d";
 
-type Shading = "solid" | "wireframe" | "xray";
+const VIEW_NAMES = ["Perspective", "Front", "Top"];
 
-function RobotFigure({ shading, pitch, roll }: { shading: Shading; pitch: number; roll: number }) {
-  const wire = shading !== "solid";
-  const bodyFill = shading === "solid" ? "url(#body)" : shading === "xray" ? "oklch(0.82 0.115 200 / 8%)" : "none";
-  const stroke = wire ? "oklch(0.82 0.115 200 / 70%)" : "oklch(0.5 0.01 260)";
+function RobotFigure({
+  shading,
+  pitch,
+  roll,
+  joints,
+  sel,
+  orbit,
+  onDown,
+  onMove,
+  onUp,
+}: {
+  shading: Shading;
+  pitch: number;
+  roll: number;
+  joints: string;
+  sel: number;
+  orbit: View;
+  onDown: (e: React.PointerEvent<SVGSVGElement>) => void;
+  onMove: (e: React.PointerEvent<SVGSVGElement>) => void;
+  onUp: (e: React.PointerEvent<SVGSVGElement>) => void;
+}) {
+  const { ground, body } = useMemo(() => {
+    const values = joints.length
+      ? joints.split(",").map((v) => (v === "-" ? null : Number(v)))
+      : [];
+    return renderScene(buildScene(legsFromJoints(values), pitch, roll), orbit, shading, sel);
+  }, [joints, pitch, roll, orbit, shading, sel]);
+
   return (
     <svg
-      viewBox="0 0 420 240"
-      className="h-full w-full max-w-2xl transition-transform duration-200"
-      style={{ transform: `rotate(${(-pitch / 4).toFixed(2)}deg) skewY(${(roll / 3).toFixed(2)}deg)` }}
+      viewBox={`0 0 ${VIEWBOX.w} ${VIEWBOX.h}`}
+      className="h-full w-full max-w-3xl select-none touch-none cursor-grab active:cursor-grabbing"
+      role="img"
+      aria-label="Sipher digital twin"
+      onPointerDown={onDown}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerCancel={onUp}
     >
-      <defs>
-        <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="oklch(0.42 0.006 260)" />
-          <stop offset="100%" stopColor="oklch(0.26 0.005 260)" />
-        </linearGradient>
-      </defs>
-      <ellipse cx="210" cy="205" rx="120" ry="10" fill="oklch(0 0 0 / 40%)" />
-      <g stroke={wire ? "oklch(0.82 0.115 200 / 60%)" : "oklch(0.55 0.02 220)"} strokeWidth={wire ? 1.4 : 4} fill="none" strokeLinecap="round">
-        <path d="M120 130 L104 168 L118 196" />
-        <path d="M150 132 L138 170 L152 197" />
-        <path d="M272 132 L288 170 L272 197" />
-        <path d="M300 130 L316 168 L302 196" />
-      </g>
-      <rect x="118" y="96" width="184" height="40" rx="12" fill={bodyFill} stroke={stroke} strokeWidth={wire ? 1.2 : 1} />
-      <rect x="296" y="86" width="44" height="34" rx="8" fill={bodyFill} stroke={stroke} strokeWidth={wire ? 1.2 : 1} />
-      {wire && (
-        <g stroke="oklch(0.82 0.115 200 / 25%)" strokeWidth="0.8">
-          {[130, 160, 190, 220, 250, 280].map((x) => (
-            <line key={x} x1={x} y1="96" x2={x} y2="136" />
-          ))}
-          <line x1="118" y1="116" x2="302" y2="116" />
-        </g>
+      {ground.map((g) =>
+        g.k === "seg" ? (
+          <polyline key={g.key} points={g.d} fill="none" stroke={g.stroke} strokeWidth={g.sw} />
+        ) : null,
       )}
-      <circle cx="332" cy="100" r="5" fill="oklch(0.82 0.115 200)" />
-      <circle cx="332" cy="100" r="10" fill="none" stroke="oklch(0.82 0.115 200 / 30%)" />
-      <g fill="oklch(0.82 0.115 200)">
-        {[120, 150, 272, 300].map((x) => (
-          <circle key={x} cx={x} cy={131} r="3" />
-        ))}
-      </g>
-      <g stroke="oklch(0.82 0.115 200 / 35%)" strokeDasharray="3 5" fill="none">
-        <path d="M332 100 L410 60" />
-        <path d="M332 100 L410 140" />
-      </g>
+      {body.map((it) =>
+        it.k === "poly" ? (
+          <polygon
+            key={it.key}
+            points={it.d}
+            fill={it.fill}
+            stroke={it.stroke}
+            strokeWidth={it.sw}
+            strokeLinejoin="round"
+          />
+        ) : it.k === "ball" ? (
+          <circle
+            key={it.key}
+            cx={it.cx}
+            cy={it.cy}
+            r={it.r}
+            fill={it.fill}
+            stroke={it.stroke}
+            strokeWidth={it.sw}
+          />
+        ) : (
+          <polyline key={it.key} points={it.d} fill="none" stroke={it.stroke} strokeWidth={it.sw} strokeLinecap="round" />
+        ),
+      )}
     </svg>
   );
 }
@@ -75,12 +101,22 @@ function AttitudeGauge({ pitch, roll, yaw }: { pitch: number; roll: number; yaw:
   );
 }
 
-function Sparkline({ data }: { data: number[] }) {
-  const min = Math.min(...data);
-  const max = Math.max(...data);
+function Sparkline({ data }: { data: (number | null)[] }) {
+  const finite = data.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  if (finite.length < 2) {
+    return (
+      <svg viewBox="0 0 100 28" preserveAspectRatio="none" className="h-6 w-full">
+        <text x="50" y="17" textAnchor="middle" fontSize="7" fill="currentColor" opacity="0.5">
+          no samples yet
+        </text>
+      </svg>
+    );
+  }
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
   const span = max - min || 1;
-  const pts = data
-    .map((v, i) => `${(i / (data.length - 1)) * 100},${28 - ((v - min) / span) * 26}`)
+  const pts = finite
+    .map((v, i) => `${(i / (finite.length - 1)) * 100},${28 - ((v - min) / span) * 26}`)
     .join(" ");
   return (
     <svg viewBox="0 0 100 28" preserveAspectRatio="none" className="h-6 w-full">
@@ -93,6 +129,49 @@ export function DigitalTwin({ tele }: { tele: Telemetry }) {
   const [shading, setShading] = useState<Shading>("solid");
   const [view, setView] = useState("Perspective");
   const [sel, setSel] = useState(0);
+  const [orbit, setOrbit] = useState<View>(VIEWS.Perspective);
+
+  const drag = useRef<{ x: number; y: number; az: number; el: number } | null>(null);
+  const queued = useRef<{ x: number; y: number } | null>(null);
+  const raf = useRef(0);
+
+  const flush = useCallback(() => {
+    raf.current = 0;
+    const d = drag.current;
+    const m = queued.current;
+    if (!d || !m) return;
+    queued.current = null;
+    setOrbit({
+      az: d.az + (m.x - d.x) * 0.5,
+      el: Math.max(2, Math.min(88, d.el - (m.y - d.y) * 0.4)),
+    });
+  }, []);
+
+  const onDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { x: e.clientX, y: e.clientY, az: orbit.az, el: orbit.el };
+  };
+  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!drag.current) return;
+    queued.current = { x: e.clientX, y: e.clientY };
+    setView("Orbit");
+    if (!raf.current) raf.current = requestAnimationFrame(flush);
+  };
+  const onUp = () => {
+    drag.current = null;
+    queued.current = null;
+    if (raf.current) {
+      cancelAnimationFrame(raf.current);
+      raf.current = 0;
+    }
+  };
+
+  const pickView = (v: string) => {
+    setView(v);
+    setOrbit(VIEWS[v] ?? VIEWS.Perspective);
+  };
+
+  const jointKey = tele.joints.map((j) => (j.value == null ? "-" : j.value.toFixed(1))).join(",");
 
   return (
     <div className="flex h-full min-h-0">
@@ -105,15 +184,28 @@ export function DigitalTwin({ tele }: { tele: Telemetry }) {
           <div className={tele.pitch > 18 ? "text-warn" : ""}>pitch {tele.pitch.toFixed(1)}°</div>
           <div>roll {tele.roll.toFixed(1)}° · yaw {tele.yaw.toFixed(0)}°</div>
           <div>contacts {tele.contacts}/4</div>
-          <div>/joint_states {tele.loopHz} Hz</div>
+          <div>/joint_states {tele.loopHz != null ? `${tele.loopHz} Hz` : "—"}</div>
         </div>
-        <div className="flex h-full items-center justify-center p-10">
-          <RobotFigure shading={shading} pitch={tele.pitch} roll={tele.roll} />
+        <div className="flex h-full items-center justify-center p-8">
+          <RobotFigure
+            shading={shading}
+            pitch={tele.pitch}
+            roll={tele.roll}
+            joints={jointKey}
+            sel={sel}
+            orbit={orbit}
+            onDown={onDown}
+            onMove={onMove}
+            onUp={onUp}
+          />
+        </div>
+        <div className="pointer-events-none absolute inset-x-0 bottom-14 text-center font-mono text-[9px] tracking-[0.16em] text-muted-foreground/60 uppercase">
+          drag to orbit
         </div>
         <AttitudeGauge pitch={tele.pitch} roll={tele.roll} yaw={tele.yaw} />
         <div className="absolute bottom-3 left-3 flex flex-wrap gap-1.5">
-          {["Perspective", "Front", "Top"].map((v) => (
-            <Chip key={v} active={view === v} onClick={() => setView(v)}>
+          {VIEW_NAMES.map((v) => (
+            <Chip key={v} active={view === v} onClick={() => pickView(v)}>
               {v}
             </Chip>
           ))}
@@ -143,13 +235,13 @@ export function DigitalTwin({ tele }: { tele: Telemetry }) {
               <div className="flex items-baseline justify-between">
                 <span className="font-mono text-[11px] text-foreground/85">{j.name}</span>
                 <span className="tabular font-mono text-[11px] text-muted-foreground">
-                  {j.value.toFixed(1)}°
+                  {j.value != null ? `${j.value.toFixed(1)}°` : "—"}
                 </span>
               </div>
               <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-rail">
                 <div
-                  className={cn("h-full transition-all", j.load > 75 ? "bg-warn" : "bg-signal/70")}
-                  style={{ width: `${j.load}%` }}
+                  className={cn("h-full transition-all", (j.load ?? 0) > 75 ? "bg-warn" : "bg-signal/70")}
+                  style={{ width: `${j.load ?? 0}%` }}
                 />
               </div>
             </button>
@@ -157,8 +249,11 @@ export function DigitalTwin({ tele }: { tele: Telemetry }) {
         </div>
         <div className="hairline-t bg-chrome px-3 py-2">
           <div className="flex items-baseline justify-between font-mono text-[10px] text-muted-foreground">
-            <span>{tele.joints[sel]?.name} · 60 samples</span>
-            <span className="tabular">load {tele.joints[sel]?.load.toFixed(0)}%</span>
+            <span>{tele.joints[sel]?.name} · {tele.history[sel]?.length ?? 0} samples</span>
+            <span className="tabular">
+              load {tele.joints[sel]?.load != null ? `${tele.joints[sel]!.load.toFixed(0)}%` : "—"}
+              {tele.joints[sel]?.pulse_us != null ? ` · ${tele.joints[sel]!.pulse_us} us` : ""}
+            </span>
           </div>
           <Sparkline data={tele.history[sel] ?? []} />
         </div>

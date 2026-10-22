@@ -11,7 +11,7 @@ WorkingDirectory=/home/sipher/sipher
 Environment=PYTHONPATH=/home/sipher/sipher/software
 Environment=SIPHER_PICO_SERIAL=/dev/ttyACM0
 Environment=SIPHER_PORT=8888
-Environment=PI_IP=192.168.1.35
+Environment=PI_IP=192.168.1.37
 ExecStart=/usr/bin/python3 -m control.command_endpoint
 Restart=always
 RestartSec=5
