@@ -2,6 +2,7 @@ import { ArrowRight, BatteryMedium, Bot, CheckCircle2, Clock3, Gauge, MapPin, Th
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Telemetry } from "./sipher";
+import { DigitalTwin } from "./DigitalTwin";
 
 function Metric({
   icon: Icon,
@@ -14,17 +15,19 @@ function Metric({
   label: string;
   value: string;
   detail: string;
-  tone?: "ok" | "warn" | "signal";
+  tone?: "ok" | "warn" | "signal" | "muted";
 }) {
+  const toneCls =
+    tone === "ok" ? "text-ok" : tone === "warn" ? "text-warn" : tone === "muted" ? "text-muted-foreground" : "text-signal";
   return (
     <div className="border border-hairline bg-panel px-4 py-3">
       <div className="flex items-center gap-2 text-[10px] tracking-[0.16em] text-muted-foreground uppercase">
-        <Icon className={cn("size-3.5", tone === "ok" ? "text-ok" : tone === "warn" ? "text-warn" : "text-signal")} />
+        <Icon className={cn("size-3.5", toneCls)} />
         {label}
       </div>
       <div className="mt-2 flex items-baseline justify-between gap-3">
         <span className="tabular text-2xl font-medium text-foreground">{value}</span>
-        <span className={cn("font-mono text-[10px]", tone === "ok" ? "text-ok" : tone === "warn" ? "text-warn" : "text-muted-foreground")}>{detail}</span>
+        <span className={cn("font-mono text-[10px]", toneCls)}>{detail}</span>
       </div>
     </div>
   );
@@ -90,9 +93,43 @@ export function CustomerDashboard({
 
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Metric icon={Gauge} label="Mission progress" value={`${Math.round(missionProgress)}%`} detail={`${tele.mission.step}/${tele.mission.total} steps`} />
-            <Metric icon={BatteryMedium} label="Battery" value={`${tele.battery.toFixed(0)}%`} detail={`${tele.minutes} min remaining`} tone={tele.battery < 25 ? "warn" : "ok"} />
-            <Metric icon={Thermometer} label="Robot temperature" value={`${tele.tempCore.toFixed(1)}°C`} detail="Within limits" tone={tele.tempCore > 65 ? "warn" : "ok"} />
-            <Metric icon={Bot} label="Fleet status" value="1 / 3" detail="On mission" tone="ok" />
+            <Metric
+              icon={BatteryMedium}
+              label="Battery"
+              value={tele.battery != null ? `${tele.battery.toFixed(0)}%` : "—"}
+              detail={tele.minutes != null ? `${tele.minutes} min remaining` : "endurance not measured"}
+              tone={tele.battery == null ? "muted" : tele.battery < 25 ? "warn" : "ok"}
+            />
+            <Metric
+              icon={Thermometer}
+              label="Robot temperature"
+              value={tele.tempCore != null ? `${tele.tempCore.toFixed(1)}°C` : "—"}
+              detail={tele.tempCore != null ? "Pi CPU sensor" : "no reading"}
+              tone={tele.tempCore == null ? "muted" : tele.tempCore > 65 ? "warn" : "ok"}
+            />
+            <Metric
+              icon={Bot}
+              label="Fleet status"
+              value={tele.piOnline && tele.picoOnline ? "1 / 1" : "0 / 1"}
+              detail={tele.piOnline && tele.picoOnline ? "robot online" : "robot offline"}
+              tone={tele.piOnline && tele.picoOnline ? "ok" : "warn"}
+            />
+          </section>
+
+          <section className="border border-hairline bg-panel">
+            <div className="hairline-b flex items-center justify-between px-5 py-4">
+              <div>
+                <div className="font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">Live digital twin</div>
+                <div className="mt-1 text-lg text-foreground">Sipher quadruped · 12-DoF</div>
+              </div>
+              <span className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
+                <span className={cn("size-1.5 rounded-full", tele.piOnline && tele.picoOnline ? "bg-ok live-dot" : "bg-muted-foreground")} />
+                drag to orbit · live joint telemetry
+              </span>
+            </div>
+            <div className="h-[560px]">
+              <DigitalTwin tele={tele} />
+            </div>
           </section>
 
           <section className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
@@ -138,7 +175,7 @@ export function CustomerDashboard({
               <div className="hairline-b flex items-center justify-between px-5 py-4"><div className="font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">Recent activity</div><Button variant="ghost" size="sm" className="h-6 px-2 font-mono text-[10px] text-muted-foreground">View all <ArrowRight /></Button></div>
               <div className="divide-y divide-hairline/60">{tele.events.slice(0, 4).map((event) => <div key={event.id} className="flex items-center gap-3 px-5 py-3"><span className={cn("size-1.5 rounded-full", event.status === "failed" ? "bg-danger" : event.status === "escalated" ? "bg-warn" : "bg-ok")} /><div className="min-w-0 flex-1"><div className="truncate text-xs text-foreground">{event.detail}</div><div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{event.agent} · {event.action}</div></div><span className="flex shrink-0 items-center gap-1 font-mono text-[10px] text-muted-foreground"><Clock3 className="size-3" /> {event.t}</span></div>)}</div>
             </div>
-            <div className="border border-hairline bg-panel p-5"><div className="font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">Connection health</div><div className="mt-5 space-y-4">{[["Pi", tele.piOnline ? "live · command endpoint" : "offline", tele.piOnline], ["Pico", tele.picoOnline ? `live · ${tele.picoAgeMs ?? "—"} ms` : "offline", tele.picoOnline], ["Mission control", `${tele.loopHz} Hz control loop`, tele.loopHz > 0], ["Safety systems", `${tele.contacts}/4 foot contacts`, tele.contacts >= 3]].map(([label, detail, good]) => <div key={String(label)} className="flex items-center gap-3"><CheckCircle2 className={cn("size-4", good ? "text-ok" : "text-warn")} /><div><div className="text-xs text-foreground">{label}</div><div className="font-mono text-[10px] text-muted-foreground">{detail}</div></div></div>)}</div></div>
+            <div className="border border-hairline bg-panel p-5"><div className="font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">Connection health</div><div className="mt-5 space-y-4">{[["Pi", tele.piOnline ? "live · command endpoint" : "offline", tele.piOnline], ["Pico", tele.picoOnline ? `live · ${tele.picoAgeMs ?? "—"} ms` : "offline", tele.picoOnline], ["Mission control", tele.loopHz != null ? `${tele.loopHz} Hz control loop` : "control loop rate unknown", (tele.loopHz ?? 0) > 0], ["Safety systems", `${tele.contacts}/4 foot contacts`, tele.contacts >= 3]].map(([label, detail, good]) => <div key={String(label)} className="flex items-center gap-3"><CheckCircle2 className={cn("size-4", good ? "text-ok" : "text-warn")} /><div><div className="text-xs text-foreground">{label}</div><div className="font-mono text-[10px] text-muted-foreground">{detail}</div></div></div>)}</div></div>
           </section>
         </div>
       </main>

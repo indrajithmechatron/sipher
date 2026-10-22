@@ -1,0 +1,17 @@
+[Unit]
+Description=Sipher Layer-1 instincts (flinch, balance, battery guard, idle life)
+After=sipher-bridge.service
+Wants=sipher-bridge.service
+
+[Service]
+Type=simple
+User=sipher
+WorkingDirectory=/home/sipher/sipher/software/robot
+ExecStart=/usr/bin/python3 /home/sipher/sipher/software/robot/instincts.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

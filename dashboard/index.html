@@ -8,6 +8,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script>
+    // Apply the saved UI theme (set1/set2) before first paint to avoid a flash.
+    try {
+      document.documentElement.dataset.theme =
+        localStorage.getItem("sipher-mc-theme") === "set2" ? "set2" : "set1";
+    } catch (e) {
+      document.documentElement.dataset.theme = "set1";
+    }
+  </script>
 </head>
 <body>
   <div id="root"></div>

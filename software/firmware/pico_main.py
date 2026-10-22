@@ -14,6 +14,8 @@ try:
 except ImportError:
     uselect = None
 
+FW_VERSION = "sipher-pico-main-v5"
+
 # ---------------------------------------------------------------------------
 # Hardware init — dual I2C buses
 # ---------------------------------------------------------------------------
@@ -26,15 +28,29 @@ try:
 except Exception:
     led = None
 
+def _bus_for(addr):
+    for _b in (i2c0, i2c1):
+        try:
+            if addr in _b.scan():
+                return _b
+        except Exception:
+            pass
+    return i2c0
+
 # ---------------------------------------------------------------------------
-# PCA9685 — 12-channel servo driver at I2C0 0x40
+# PCA9685 — 16-channel servo driver (auto-bus, addr 0x40)
 # ---------------------------------------------------------------------------
 PCA_ADDR = 0x40
+pca_bus = _bus_for(PCA_ADDR)
 try:
-    i2c0.writeto_mem(PCA_ADDR, 0x00, b'\x10')
+    pca_bus.writeto_mem(PCA_ADDR, 0x00, b'\x10')
     time.sleep_ms(5)
-    i2c0.writeto_mem(PCA_ADDR, 0xFE, bytes([121]))
-    i2c0.writeto_mem(PCA_ADDR, 0x00, b'\x80')
+    pca_bus.writeto_mem(PCA_ADDR, 0xFE, bytes([121]))
+    pca_bus.writeto_mem(PCA_ADDR, 0x01, b'\x04')
+    pca_bus.writeto_mem(PCA_ADDR, 0x02, b'\x00')
+    # MODE1 = RESTART | AUTO_INCREMENT. AI is required for the 64-byte
+    # register readback in pca_readback(); without it every byte returns ON_L.
+    pca_bus.writeto_mem(PCA_ADDR, 0x00, b'\xA0')
     time.sleep_ms(5)
 except Exception:
     pass
@@ -42,14 +58,16 @@ except Exception:
 def pca_set_channel(ch, pulse_us):
     try:
         val = int(pulse_us / 20000.0 * 4096) & 0xFFF
-        addr = 0x06 + ch * 2
-        i2c0.writeto_mem(PCA_ADDR, addr, bytes([val & 0xFF]))
-        i2c0.writeto_mem(PCA_ADDR, addr + 1, bytes([(val >> 8) & 0xFF]))
+        base = 0x06 + ch * 4
+        pca_bus.writeto_mem(PCA_ADDR, base, b'\x00')
+        pca_bus.writeto_mem(PCA_ADDR, base + 1, b'\x00')
+        pca_bus.writeto_mem(PCA_ADDR, base + 2, bytes([val & 0xFF]))
+        pca_bus.writeto_mem(PCA_ADDR, base + 3, bytes([(val >> 8) & 0xFF]))
     except Exception:
         pass
 
 def pca_set_servos(positions):
-    for ch, pos in enumerate(positions[:12]):
+    for ch, pos in enumerate(positions[:16]):
         if isinstance(pos, (int, float)):
             if pos > 500:
                 pca_set_channel(ch, pos)
@@ -59,44 +77,333 @@ def pca_set_servos(positions):
 # ---------------------------------------------------------------------------
 # MPU6050 on I2C1 0x68
 # ---------------------------------------------------------------------------
+MPU_ADDR = 0x68
+GYRO_LSB_PER_DPS = 131.2          # FS_SEL=0 -> +/-250 dps
+_yaw_deg = 0.0                     # integrated heading, 0..360
+_gz_bias = 0.0                     # gyro-z bias in raw LSB
+_yaw_last_ms = 0
+
+def _mpu_init():
+    """Wake the MPU and lock it to +/-250 dps / +/-2 g so yaw maths is well defined."""
+    try:
+        i2c1.writeto_mem(MPU_ADDR, 0x6B, b'\x01')   # wake, clock = PLL X gyro
+        time.sleep_ms(50)
+        i2c1.writeto_mem(MPU_ADDR, 0x1A, b'\x03')   # DLPF: gyro 42 Hz
+        i2c1.writeto_mem(MPU_ADDR, 0x1B, b'\x00')   # gyro FS +/-250 dps
+        i2c1.writeto_mem(MPU_ADDR, 0x1C, b'\x00')   # accel FS +/-2 g
+        time.sleep_ms(10)
+        return True
+    except Exception:
+        return False
+
 def read_mpu():
     try:
-        d = i2c1.readfrom_mem(0x68, 0x3B, 14)
+        d = i2c1.readfrom_mem(MPU_ADDR, 0x3B, 14)
         ax, ay, az = struct.unpack(">hhh", d[0:6])
         gx, gy, gz = struct.unpack(">hhh", d[8:14])
         return [ax, ay, az, gx, gy, gz]
     except Exception:
         return None
 
+def mpu_temp_c():
+    """Die temperature from MPU6050 TEMP_OUT (0x41), LSB = 1/340 C."""
+    try:
+        raw = struct.unpack(">h", i2c1.readfrom_mem(MPU_ADDR, 0x41, 2))[0]
+        return round(raw / 340.0 + 36.53, 2)
+    except Exception:
+        return None
+
+def gyro_calibrate(samples=100, delay_ms=5):
+    """Average gyro-z while stationary so yaw integration does not drift immediately."""
+    global _gz_bias
+    total = 0
+    got = 0
+    for _ in range(samples):
+        try:
+            raw = struct.unpack(">h", i2c1.readfrom_mem(MPU_ADDR, 0x47, 2))[0]
+            total += raw
+            got += 1
+        except Exception:
+            pass
+        time.sleep_ms(delay_ms)
+    if got:
+        _gz_bias = total / got
+    return {"gyro_cal": round(_gz_bias, 2), "samples": got}
+
+def _read_gz():
+    # GYRO_ZOUT_H = 0x47.  0x44 is GYRO_XOUT_L and yields garbage that made
+    # yaw integrate a bogus rate (gyro_cal ~ -22000 LSB).
+    try:
+        return struct.unpack(">h", i2c1.readfrom_mem(MPU_ADDR, 0x47, 2))[0]
+    except Exception:
+        return None
+
+def update_yaw():
+    """Integrate gyro-z into _yaw_deg. Call once per sensor tick."""
+    global _yaw_deg, _yaw_last_ms
+    now = time.ticks_ms()
+    dt = time.ticks_diff(now, _yaw_last_ms) / 1000.0
+    _yaw_last_ms = now
+    if dt <= 0 or dt > 2.0:        # first call / stalled loop: no integration
+        return _yaw_deg
+    gz = _read_gz()
+    if gz is None:
+        return _yaw_deg
+    _yaw_deg = (_yaw_deg + ((gz - _gz_bias) / GYRO_LSB_PER_DPS) * dt) % 360.0
+    return _yaw_deg
+
+def yaw_deg():
+    return round(_yaw_deg, 2)
+
+
 # ---------------------------------------------------------------------------
-# VL53L0X on I2C0 0x29 — proper single-shot ranging
+# VL53L0X — auto-bus (addr 0x29) — ST init sequence + single-shot ranging.
+# Out of the box the sensor ACKs but never ranges: every tuning/timeout
+# register is 0 and SYSRANGE_START completes with 0x1FFF (no data).  It needs
+# the full ST DataInit/StaticInit path (port of the Adafruit/Pololu driver).
+# ID registers are 0xC0/0xC1/0xC2 = EE/AA/10 (NOT 0xD0).
 # ---------------------------------------------------------------------------
+VL_ADDR = 0x29
+vl_bus = _bus_for(VL_ADDR)
 _vl53_ready = False
+_vl53_stop = 0
+_vl53_attempts = 0
+
+def _v8(reg):
+    return vl_bus.readfrom_mem(VL_ADDR, reg, 1)[0]
+
+def _vw(reg, val):
+    vl_bus.writeto_mem(VL_ADDR, reg, bytes([val & 0xFF]))
+
+def _v16(reg):
+    b = vl_bus.readfrom_mem(VL_ADDR, reg, 2)
+    return (b[0] << 8) | b[1]
+
+def _vw16(reg, val):
+    vl_bus.writeto_mem(VL_ADDR, reg, bytes([(val >> 8) & 0xFF, val & 0xFF]))
+
+def _tm_encode(mclks):
+    mclks = int(mclks) & 0xFFFF
+    if mclks <= 0:
+        return 0
+    ls = mclks - 1
+    ms = 0
+    while ls > 255:
+        ls >>= 1
+        ms += 1
+    return ((ms << 8) | (ls & 0xFF)) & 0xFFFF
+
+def _tm_decode(val):
+    return float(val & 0xFF) * (2.0 ** ((val & 0xFF00) >> 8)) + 1
+
+def _mclks_to_us(mclks, vpclks):
+    macro = ((2304 * vpclks * 1655) + 500) // 1000
+    return ((mclks * macro) + (macro // 2)) // 1000
+
+def _us_to_mclks(us, vpclks):
+    macro = ((2304 * vpclks * 1655) + 500) // 1000
+    return ((us * 1000) + (macro // 2)) // macro
+
+def _vcsel(kind):
+    # kind 0 = pre-range (reg 0x50), 1 = final range (reg 0x70)
+    v = _v8(0x50 if kind == 0 else 0x70)
+    return (((v) + 1) & 0xFF) << 1
+
+def _seq_enables():
+    sc = _v8(0x01)
+    return ((sc >> 4) & 1, (sc >> 3) & 1, (sc >> 2) & 1,
+            (sc >> 6) & 1, (sc >> 7) & 1)          # tcc, dss, msrc, pre, final
+
+def _seq_timeouts(pre_range):
+    pre_vp = _vcsel(0)
+    msrc_us = _mclks_to_us((_v8(0x46) + 1) & 0xFF, pre_vp)
+    pre_mclks = _tm_decode(_v16(0x51))
+    pre_us = _mclks_to_us(pre_mclks, pre_vp)
+    fin_vp = _vcsel(1)
+    fin_mclks = _tm_decode(_v16(0x71))
+    if pre_range:
+        fin_mclks -= pre_mclks
+    fin_us = _mclks_to_us(fin_mclks, fin_vp)
+    return (msrc_us, pre_us, fin_us, fin_vp, pre_mclks)
+
+def _budget_get():
+    tcc, dss, msrc, pre, fin = _seq_enables()
+    msrc_us, pre_us, fin_us, _, _ = _seq_timeouts(pre)
+    budget = 1910 + 960
+    if tcc:
+        budget += msrc_us + 590
+    if dss:
+        budget += 2 * (msrc_us + 690)
+    elif msrc:
+        budget += msrc_us + 660
+    if pre:
+        budget += pre_us + 660
+    if fin:
+        budget += fin_us + 550
+    return int(budget)
+
+def _budget_set(budget):
+    used = 1320 + 960
+    tcc, dss, msrc, pre, fin = _seq_enables()
+    msrc_us, pre_us, _, fin_vp, pre_mclks = _seq_timeouts(pre)
+    if tcc:
+        used += msrc_us + 590
+    if dss:
+        used += 2 * (msrc_us + 690)
+    elif msrc:
+        used += msrc_us + 660
+    if pre:
+        used += pre_us + 660
+    if not fin:
+        return True
+    used += 550
+    if used > budget:
+        return False
+    fin_mclks = _us_to_mclks(budget - used, fin_vp)
+    if pre:
+        fin_mclks += pre_mclks
+    _vw16(0x71, _tm_encode(fin_mclks))
+    return True
+
+def _spad_info():
+    for reg, val in ((0x80, 0x01), (0xFF, 0x01), (0x00, 0x00), (0xFF, 0x06)):
+        _vw(reg, val)
+    _vw(0x83, _v8(0x83) | 0x04)
+    for reg, val in ((0xFF, 0x07), (0x81, 0x01), (0x80, 0x01),
+                     (0x94, 0x6B), (0x83, 0x00)):
+        _vw(reg, val)
+    t0 = time.ticks_ms()
+    while _v8(0x83) == 0x00:
+        if time.ticks_diff(time.ticks_ms(), t0) > 400:
+            return None
+        time.sleep_ms(1)
+    _vw(0x83, 0x01)
+    tmp = _v8(0x92)
+    count = tmp & 0x7F
+    aperture = ((tmp >> 7) & 1) == 1
+    for reg, val in ((0x81, 0x00), (0xFF, 0x06)):
+        _vw(reg, val)
+    _vw(0x83, _v8(0x83) & ~0x04)
+    for reg, val in ((0xFF, 0x01), (0x00, 0x01), (0xFF, 0x00), (0x80, 0x00)):
+        _vw(reg, val)
+    return (count, aperture)
+
+def _ref_cal(vhv):
+    _vw(0x00, 0x01 | vhv & 0xFF)
+    t0 = time.ticks_ms()
+    while (_v8(0x13) & 0x07) == 0:
+        if time.ticks_diff(time.ticks_ms(), t0) > 400:
+            return False
+        time.sleep_ms(1)
+    _vw(0x0B, 0x01)
+    _vw(0x00, 0x00)
+    return True
 
 def _vl53_init():
-    global _vl53_ready
+    global _vl53_ready, _vl53_stop
     try:
-        i2c0.writeto_mem(0x29, 0x01, b'\x01')
-        time.sleep_ms(20)
-        i2c0.writeto_mem(0x29, 0x00, b'\x00')
-        time.sleep_ms(50)
+        if (_v8(0xC0) != 0xEE) or (_v8(0xC1) != 0xAA) or (_v8(0xC2) != 0x10):
+            _vl53_ready = False
+            return False
+        # unlock + read the stored stop variable
+        for reg, val in ((0x88, 0x00), (0x80, 0x01), (0xFF, 0x01), (0x00, 0x00)):
+            _vw(reg, val)
+        _vl53_stop = _v8(0x91)
+        for reg, val in ((0x00, 0x01), (0xFF, 0x00), (0x80, 0x00)):
+            _vw(reg, val)
+        _vw(0x60, _v8(0x60) | 0x12)
+        _vw16(0x44, int(0.25 * (1 << 7)))            # signal rate limit 0.25 MCPS
+        _vw(0x01, 0xFF)
+        spad = _spad_info()
+        if spad is None:
+            _vl53_ready = False
+            return False
+        spad_count, is_aperture = spad
+        vl_bus.writeto(VL_ADDR, b'\xB0')
+        ref = bytearray(vl_bus.readfrom(VL_ADDR, 6))  # 0xB0..0xB5
+        for reg, val in ((0xFF, 0x01), (0x4F, 0x00), (0x4E, 0x2C),
+                         (0xFF, 0x00), (0xB6, 0xB4)):
+            _vw(reg, val)
+        first = 12 if is_aperture else 0
+        enabled = 0
+        for i in range(48):
+            if i < first or enabled == spad_count:
+                ref[i // 8] &= ~(1 << (i % 8))
+            elif (ref[i // 8] >> (i % 8)) & 1:
+                enabled += 1
+        vl_bus.writeto(VL_ADDR, b'\xB0' + bytes(ref))
+        # default tuning settings (ST VL53L0X_DEFAULT_TUNING_SETTINGS)
+        for reg, val in (
+            (0xFF, 0x01), (0x00, 0x00), (0xFF, 0x00), (0x09, 0x00),
+            (0x10, 0x00), (0x11, 0x00), (0x24, 0x01), (0x25, 0xFF),
+            (0x75, 0x00), (0xFF, 0x01), (0x4E, 0x2C), (0x48, 0x00),
+            (0x30, 0x20), (0xFF, 0x00), (0x30, 0x09), (0x54, 0x00),
+            (0x31, 0x04), (0x32, 0x03), (0x40, 0x83), (0x46, 0x25),
+            (0x60, 0x00), (0x27, 0x00), (0x50, 0x06), (0x51, 0x00),
+            (0x52, 0x96), (0x56, 0x08), (0x57, 0x30), (0x61, 0x00),
+            (0x62, 0x00), (0x64, 0x00), (0x65, 0x00), (0x66, 0xA0),
+            (0xFF, 0x01), (0x22, 0x32), (0x47, 0x14), (0x49, 0xFF),
+            (0x4A, 0x00), (0xFF, 0x00), (0x7A, 0x0A), (0x7B, 0x00),
+            (0x78, 0x21), (0xFF, 0x01), (0x23, 0x34), (0x42, 0x00),
+            (0x44, 0xFF), (0x45, 0x26), (0x46, 0x05), (0x40, 0x40),
+            (0x0E, 0x06), (0x20, 0x1A), (0x43, 0x40), (0xFF, 0x00),
+            (0x34, 0x03), (0x35, 0x44), (0xFF, 0x01), (0x31, 0x04),
+            (0x4B, 0x09), (0x4C, 0x05), (0x4D, 0x04), (0xFF, 0x00),
+            (0x44, 0x00), (0x45, 0x20), (0x47, 0x08), (0x48, 0x28),
+            (0x67, 0x00), (0x70, 0x04), (0x71, 0x01), (0x72, 0xFE),
+            (0x76, 0x00), (0x77, 0x00), (0xFF, 0x01), (0x0D, 0x01),
+            (0xFF, 0x00), (0x80, 0x01), (0x01, 0xF8), (0xFF, 0x01),
+            (0x8E, 0x01), (0x00, 0x01), (0xFF, 0x00), (0x80, 0x00),
+        ):
+            _vw(reg, val)
+        _vw(0x0A, 0x04)                              # new sample ready IRQ
+        _vw(0x84, _v8(0x84) & ~0x10)                 # active low
+        _vw(0x0B, 0x01)
+        budget = _budget_get()
+        _vw(0x01, 0xE8)
+        if not _budget_set(budget):
+            _vl53_ready = False
+            return False
+        _vw(0x01, 0x01)
+        if not _ref_cal(0x40):
+            _vl53_ready = False
+            return False
+        _vw(0x01, 0x02)
+        if not _ref_cal(0x00):
+            _vl53_ready = False
+            return False
+        _vw(0x01, 0xE8)
         _vl53_ready = True
+        return True
     except Exception:
         _vl53_ready = False
+        return False
 
 def read_vl53():
+    global _vl53_attempts
     if not _vl53_ready:
-        _vl53_init()
+        if _vl53_attempts >= 3:
+            return None
+        _vl53_attempts += 1
+        if not _vl53_init():
+            return None
     try:
-        i2c0.writeto_mem(0x29, 0x00, b'\x01')
-        time.sleep_ms(35)
-        for _ in range(10):
-            st = i2c0.readfrom_mem(0x29, 0x14, 1)[0]
-            if st & 0x01:
-                break
-            time.sleep_ms(5)
-        d = i2c0.readfrom_mem(0x29, 0x1E, 2)
-        dist = (d[0] << 8) | d[1]
+        for reg, val in ((0x80, 0x01), (0xFF, 0x01), (0x00, 0x00),
+                         (0x91, _vl53_stop), (0x00, 0x01), (0xFF, 0x00),
+                         (0x80, 0x00), (0x00, 0x01)):
+            _vw(reg, val)
+        t0 = time.ticks_ms()
+        while (_v8(0x00) & 0x01) > 0:
+            if time.ticks_diff(time.ticks_ms(), t0) > 150:
+                return None
+            time.sleep_ms(1)
+        t0 = time.ticks_ms()
+        while (_v8(0x13) & 0x07) == 0:
+            if time.ticks_diff(time.ticks_ms(), t0) > 150:
+                return None
+            time.sleep_ms(1)
+        dist = _v16(0x1E)                            # RESULT_RANGE_STATUS + 10
+        _vw(0x0B, 0x01)
         return dist if dist < 8000 else None
     except Exception:
         return None
@@ -104,38 +411,46 @@ def read_vl53():
 _vl53_init()
 
 # ---------------------------------------------------------------------------
-# INA219 on I2C0 0x41 — proper current/power reading
+# INA219 — auto-bus (addr 0x41) — proper current/power reading
 # ---------------------------------------------------------------------------
 INA_ADDR = 0x41
+ina_bus = _bus_for(INA_ADDR)
+INA_SHUNT_OHM = 0.1                 # standard INA219 breakout shunt
 
 def _ina_init():
     try:
-        i2c0.writeto_mem(INA_ADDR, 0x05, b'\x1F\x00')
+        ina_bus.writeto_mem(INA_ADDR, 0x05, b'\x1F\x00')
         time.sleep_ms(1)
-        i2c0.writeto_mem(INA_ADDR, 0x00, b'\x39\x9F')
+        # CONFIG 0x399F: 32V range, PGA +/-320mV, 2x bus / 8x shunt averaging, continuous
+        ina_bus.writeto_mem(INA_ADDR, 0x00, b'\x39\x9F')
         time.sleep_ms(1)
     except Exception:
         pass
 
 def read_ina():
     try:
-        raw_bus = i2c0.readfrom_mem(INA_ADDR, 0x02, 2)
+        raw_bus = ina_bus.readfrom_mem(INA_ADDR, 0x02, 2)
         bus_raw = int.from_bytes(raw_bus, 'big')
-        bus_v = (bus_raw >> 3) * 0.004
+        bus_v = (bus_raw >> 3) * 0.004            # BUSVOLTAGE LSB = 4 mV
 
-        raw_shunt = i2c0.readfrom_mem(INA_ADDR, 0x01, 2)
+        raw_shunt = ina_bus.readfrom_mem(INA_ADDR, 0x01, 2)
         shunt_raw = struct.unpack(">h", raw_shunt)[0]
-        shunt_uv = shunt_raw * 10
+        shunt_uv = shunt_raw * 10                 # SHUNTVOLTAGE LSB = 10 uV
 
-        current_ma = shunt_uv / 10.0
+        # I(mA) = V(uV) * 1e-6 / R(ohm) * 1000  =>  shunt_uv / (R * 1000)
+        current_ma = shunt_uv / (INA_SHUNT_OHM * 1000.0)
+        power_mw = bus_v * current_ma
 
         return {
             "voltage_v": round(bus_v, 3),
             "current_ma": round(current_ma, 2),
-            "shunt_uv": shunt_uv
+            "power_mw": round(power_mw, 1),
+            "shunt_uv": shunt_uv,
+            "shunt_ohm": INA_SHUNT_OHM
         }
     except Exception:
         return None
+
 
 _ina_init()
 
@@ -435,27 +750,237 @@ def cmd_scan():
     except Exception as e:
         return {"error": str(e)}
 
+# --- cached I2C scans (a full scan is ~15 ms per bus; too slow for every tick) ---
+_scan_cache = {"i2c0": [], "i2c1": [], "ts": 0}
+
+def _refresh_scans(force=False):
+    now = time.ticks_ms()
+    if force or time.ticks_diff(now, _scan_cache["ts"]) > 5000:
+        try:
+            _scan_cache["i2c0"] = [hex(x) for x in i2c0.scan()]
+            _scan_cache["i2c1"] = [hex(x) for x in i2c1.scan()]
+            _scan_cache["ts"] = now
+        except Exception:
+            pass
+    return _scan_cache
+
+def _pca_present():
+    scan = _scan_cache["i2c0"] if pca_bus is i2c0 else _scan_cache["i2c1"]
+    return hex(PCA_ADDR) in scan
+
+def pca_readback():
+    """Read the PCA9685 ON/OFF registers back -> the pulse width actually being driven."""
+    out = {"present": False, "pulse_us": [], "deg": []}
+    if not _pca_present():
+        return out
+    try:
+        raw = pca_bus.readfrom_mem(PCA_ADDR, 0x06, 64)   # ch0..ch15 (on_l,on_h,off_l,off_h)
+        pulses = []
+        for ch in range(16):
+            b = ch * 4
+            on = (raw[b] | (raw[b + 1] << 8)) & 0xFFF
+            off = (raw[b + 2] | (raw[b + 3] << 8)) & 0xFFF
+            ticks = (off - on) & 0xFFF
+            pulses.append(int(round(ticks * 20000.0 / 4096)))
+        out["present"] = True
+        out["pulse_us"] = pulses
+        # 0 us = channel not driven (no meaningful angle); do not show -45 deg.
+        out["deg"] = [None if p == 0 else round((p - 500) / 2000.0 * 180.0, 1)
+                      for p in pulses]
+    except Exception as e:
+        out["error"] = str(e)
+    return out
+
+_tick_last_ms = 0
+
 def cmd_sensors():
+    global _tick_last_ms
+    now = time.ticks_ms()
+    dt_ms = time.ticks_diff(now, _tick_last_ms) if _tick_last_ms else None
+    _tick_last_ms = now
+    _refresh_scans()
+    update_yaw()
     mpu = read_mpu()
     vl = read_vl53()
     ina = read_ina()
     gps = read_gps()
+    # Pico status: track if we're receiving valid sensor data
+    pico_online = mpu is not None  # MPU data presence indicates Pico is alive
+    pico_age_ms = dt_ms  # Time since last sensor tick
     return {
+        "cmd": "dashboard_tick",
         "mpu": mpu,
+        "mpu_temp_c": mpu_temp_c(),
+        "yaw_deg": yaw_deg(),
         "vl53_mm": vl,
         "ina": ina,
         "gps": gps,
-        "i2c0": [hex(x) for x in i2c0.scan()],
-        "i2c1": [hex(x) for x in i2c1.scan()]
+        "pca": pca_readback(),
+        "uptime_s": time.ticks_ms() // 1000,
+        "version": FW_VERSION,
+        "dt_ms": dt_ms,
+        "i2c0": _scan_cache["i2c0"],
+        "i2c1": _scan_cache["i2c1"],
+        "_meta": {
+            "pico": pico_online,
+            "pico_age_ms": pico_age_ms,
+            "bridge": True,  # bridge is always up when this endpoint is called
+        }
     }
 
+
 def cmd_servo(ch, deg):
-    pca_set_servos([0]*ch + [deg] + [0]*(11-ch))
-    return {"servo": {"ch": ch, "deg": deg}}
+    if not isinstance(ch, int) or ch < 0 or ch > 15:
+        return {"servo": "bad_ch"}
+    if isinstance(deg, (int, float)) and deg > 500:
+        pulse = int(deg)
+    else:
+        pulse = int(500 + (float(deg) / 180.0) * 2000)
+    pca_set_channel(ch, pulse)
+    return {"servo": {"ch": ch, "deg": deg, "pulse_us": pulse}}
 
 def cmd_servos(positions):
     pca_set_servos(positions)
     return {"servos": "ok"}
+
+def cmd_sweep(ch=0, lo=30, hi=150, step=10, delay_ms=150, hold_end=True):
+    """Sweep one PCA channel back and forth so you can spot the servo."""
+    try:
+        ch = int(ch)
+    except Exception:
+        return {"sweep": "bad_ch"}
+    if ch < 0 or ch > 15:
+        return {"sweep": "bad_ch"}
+    try:
+        lo = int(lo); hi = int(hi); step = int(step); delay_ms = int(delay_ms)
+    except Exception:
+        return {"sweep": "bad_args"}
+    if step <= 0:
+        step = 10
+    if lo > hi:
+        lo, hi = hi, lo
+    lo = max(0, min(180, lo)); hi = max(0, min(180, hi))
+    angles = list(range(lo, hi + 1, step))
+    if angles[-1] != hi:
+        angles.append(hi)
+    angles += list(reversed(angles[:-1]))
+    for deg in angles:
+        pca_set_channel(ch, int(500 + (deg / 180.0) * 2000))
+        time.sleep_ms(delay_ms)
+    if hold_end:
+        pca_set_channel(ch, 1500)
+    return {"sweep": "ok", "ch": ch, "lo": lo, "hi": hi, "step": step, "held_90": bool(hold_end)}
+
+def cmd_sweep_ch0():
+    return cmd_sweep(0, 30, 150, 10, 150, True)
+
+USED_CHANNELS = [0, 1, 2, 3, 5, 7, 8, 10, 12, 13, 14, 15]
+
+def _deg_to_pulse(deg):
+    return int(500 + (max(0, min(180, deg)) / 180.0) * 2000)
+
+def cmd_sweep_all():
+    """One-shot test: move all 12 connected servos together 90->60->120->90."""
+    for deg in (90, 60, 120, 90):
+        pulse = _deg_to_pulse(deg)
+        for ch in USED_CHANNELS:
+            pca_set_channel(ch, pulse)
+        time.sleep_ms(600)
+    return {"sweep_all": "ok", "channels": USED_CHANNELS, "held_90": True}
+
+def cmd_sweep_10_120_0():
+    """Sweep channel 0 from 10° to 120° then back to 0°.
+    One full cycle: 10° → 120° → 0°. PWM remains set at 0° (500µs) at the end."""
+    # 10° → 120°
+    for deg in range(10, 121, 10):  # 10,20,...,120
+        pca_set_channel(0, int(500 + (deg / 180.0) * 2000))
+        time.sleep_ms(15)
+    # 120° → 0°
+    for deg in range(120, -1, -10):  # 120,110,...,0
+        pca_set_channel(0, int(500 + (deg / 180.0) * 2000))
+        time.sleep_ms(15)
+    return {"sweep_10_120_0": "ok", "cycled": "10→120→0"}
+
+def cmd_sweep_ch0_continuous():
+    """Continuously sweep channel 0 back-and-forth between 10° and 120°.
+    Uses the same 500-2500µs mapping as the 4 digital 180° servos (1499µs at 90°).
+    Fast step (8ms) makes it appear continuous; send any other command (e.g. stand90) to park at 1500."""
+    try:
+        while True:
+            # 10° → 120°
+            for deg in range(10, 121, 10):  # 10,20,...,120
+                pca_set_channel(0, int(500 + (deg / 180.0) * 2000))
+                time.sleep_ms(8)
+            # 120° → 10°
+            for deg in range(120, 9, -10):  # 120,110,...,10
+                pca_set_channel(0, int(500 + (deg / 180.0) * 2000))
+                time.sleep_ms(8)
+    except Exception:
+        pca_set_channel(0, 1500)
+        return {"sweep_ch0_continuous": "stopped", "held_at": "90°"}
+
+def cmd_stand90():
+    scan = [hex(x) for x in pca_bus.scan()]
+    present = hex(PCA_ADDR) in scan
+    pca_set_servos([90] * 16)
+    return {"stand90": "ok" if present else "no_pca", "deg": 90, "channels": 16,
+            "bus": 1 if pca_bus is i2c1 else 0, "scan": scan}
+
+def cmd_relax_all():
+    """Cut PWM on all channels (0us = no signal). Servos go limp and silent."""
+    for ch in range(16):
+        pca_set_channel(ch, 0)
+    return {"relax_all": "ok", "channels": 16, "pulse_us": 0}
+
+def cmd_sweep_0_90_continuous():
+    """Sweep channel 0 pulse from 0° (500us) to 90° (1500us) and back to 0°.
+    One cycle = forward ramp to stop then reverse ramp from stop.
+    Send the command again to repeat the cycle.
+    Other commands (e.g. stand90) can interrupt by parking at 1500."""
+    try:
+        # Forward: 0° → 90° : pulse 500 → 1500
+        for step in range(0, 1001, 10):  # 0 to 1000 in steps of 10
+            pulse = 500 + (step / 1000.0) * 1000
+            pca_set_channel(0, int(pulse))
+            time.sleep_ms(5)
+        # Reverse: 90° → 0° : pulse 1500 → 500
+        for step in range(1000, -1, -10):  # 1000 down to 0 in steps of 10
+            pulse = 500 + (step / 1000.0) * 1000
+            pca_set_channel(0, int(pulse))
+            time.sleep_ms(5)
+        return {"sweep_0_90_continuous": "ok", "cycled": "0→90→0"}
+    except Exception as e:
+        pca_set_channel(0, 1500)
+        return {"sweep_0_90_continuous": "stopped", "error": str(e)}
+
+def _pca_rd(reg):
+    return pca_bus.readfrom_mem(PCA_ADDR, reg, 1)[0]
+
+def cmd_pca_read():
+    out = {"bus": 1 if pca_bus is i2c1 else 0}
+    try:
+        scan = [hex(x) for x in pca_bus.scan()]
+        out["scan"] = scan
+        out["present"] = hex(PCA_ADDR) in scan
+        if not out["present"]:
+            return {"pca_read": out}
+        for reg, name in ((0x00, "mode1"), (0x01, "mode2"), (0x02, "sub1"),
+                          (0x06, "ch0_on_l"), (0x07, "ch0_on_h"),
+                          (0x08, "ch0_off_l"), (0x09, "ch0_off_h"),
+                          (0x42, "ch15_on_l"), (0x43, "ch15_on_h"),
+                          (0x44, "ch15_off_l"), (0x45, "ch15_off_h"),
+                          (0xFA, "all_on_l"), (0xFD, "all_off_h"),
+                          (0xFE, "prescale")):
+            out[name] = _pca_rd(reg)
+        pca_set_channel(0, 1500)
+        time.sleep_ms(5)
+        out["ch0_off_l_wr"] = _pca_rd(0x08)
+        out["ch0_off_h_wr"] = _pca_rd(0x09)
+        if "0x70" in scan:
+            out["x70_r00"] = pca_bus.readfrom_mem(0x70, 0x00, 1)[0]
+    except Exception as e:
+        out["error"] = str(e)
+    return {"pca_read": out}
 
 def cmd_fill_screen(color):
     tft_fill(color)
@@ -567,11 +1092,13 @@ def cmd_get_time():
     return {"cmd": "time", "t": rtc_now(), "hms": time.strftime("%H:%M:%S", time.localtime(rtc_now()))}
 
 def cmd_status():
+    _refresh_scans()
     return {
-        "version": "sipher-pico-main-v3",
+        "version": FW_VERSION,
         "uptime_s": time.ticks_ms() // 1000,
-        "i2c0": [hex(x) for x in i2c0.scan()],
-        "i2c1": [hex(x) for x in i2c1.scan()]
+        "yaw_deg": yaw_deg(),
+        "i2c0": _scan_cache["i2c0"],
+        "i2c1": _scan_cache["i2c1"]
     }
 
 def cmd_led(on):
@@ -579,11 +1106,37 @@ def cmd_led(on):
         led.value(1 if on else 0)
     return {"led": on}
 
+def cmd_gyro_cal(samples=100):
+    return gyro_calibrate(int(samples))
+
+def cmd_yaw_reset():
+    global _yaw_deg
+    _yaw_deg = 0.0
+    return {"yaw_deg": 0.0}
+
+def cmd_servo_ch0_90():
+    """Drive PCA channel 0 to 90 deg (1500us) and hold."""
+    pca_set_channel(0, 1500)
+    return {"ch0_90": "ok", "ch": 0, "deg": 90, "pulse_us": 1500}
+
 CMD_MAP = {
     "scan": (lambda p: cmd_scan()),
     "sensors": (lambda p: cmd_sensors()),
     "servo": (lambda p: cmd_servo(p.get("ch", 0), p.get("deg", 90))),
+    "servo_ch0_90": (lambda p: cmd_servo_ch0_90()),
+    "sweep": (lambda p: cmd_sweep(p.get("ch", 0), p.get("lo", 30), p.get("hi", 150), p.get("step", 10), p.get("delay_ms", 150), p.get("hold_end", True))),
+    "sweep_ch0": (lambda p: cmd_sweep_ch0()),
+    "sweep_all": (lambda p: cmd_sweep_all()),
     "servos": (lambda p: cmd_servos(p.get("positions", []))),
+    "stand90": (lambda p: cmd_stand90()),
+    "relax_all": (lambda p: cmd_relax_all()),
+    "sweep_0_90_continuous": (lambda p: cmd_sweep_0_90_continuous()),
+    "sweep_10_120_0": (lambda p: cmd_sweep_10_120_0()),
+    "sweep_ch0_continuous": (lambda p: cmd_sweep_ch0_continuous()),
+    "pca_read": (lambda p: cmd_pca_read()),
+    "gyro_cal": (lambda p: cmd_gyro_cal(p.get("samples", 100))),
+    "yaw_reset": (lambda p: cmd_yaw_reset()),
+
     "fill_screen": (lambda p: cmd_fill_screen(p.get("color", 0))),
     "line": (lambda p: cmd_line(p.get("x0",0), p.get("y0",0), p.get("x1",0), p.get("y1",0), p.get("color",0xFFFF))),
     "rect": (lambda p: cmd_rect(p.get("x",0), p.get("y",0), p.get("w",0), p.get("h",0), p.get("color",0xFFFF))),
@@ -607,11 +1160,19 @@ _dashboard_interval = 1000
 _dashboard_running = True
 
 def main():
+    global _yaw_last_ms
+    try:
+        pca_set_channel(0, 1500)
+    except Exception:
+        pass
+    _mpu_init()
     tft_ok = tft_init()
     if tft_ok:
         img = cmd_show_image()
         tft_ok = img.get("show_image") == "ok"
-    print(_json.dumps({"version": "sipher-pico-main-v3", "tft": tft_ok, "ready": True}))
+    _yaw_last_ms = time.ticks_ms()
+    cal = gyro_calibrate(100, 5)      # ~0.5 s, robot should be still
+    print(_json.dumps({"version": FW_VERSION, "tft": tft_ok, "gyro": cal, "ready": True}))
     buf = b""
     last_tick = time.ticks_ms()
     poller = None

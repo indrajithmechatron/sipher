@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ExternalLink, Maximize2, Minus, Plus, X } from "lucide-react";
 import { TERMINALS, TERMINAL_LINES } from "./data";
 import { cn } from "@/lib/utils";
 import { Dot } from "./chrome";
 import type { Telemetry } from "./sipher";
+
+type Line = { c: string; text: string; partial?: boolean };
 
 const colorFor: Record<string, string> = {
   fg: "text-foreground/85",
@@ -14,8 +16,231 @@ const colorFor: Record<string, string> = {
   signal: "text-signal",
 };
 
+type PsEvent = {
+  ready?: boolean;
+  version?: string;
+  cwd?: string;
+  chunk?: string;
+  err?: string;
+  error?: string;
+  done?: boolean;
+  ok?: boolean;
+  code?: number;
+  session?: string;
+};
+
+function PowerShellSession() {
+  const [lines, setLines] = useState<Line[]>([
+    { c: "muted", text: "Windows PowerShell · persistent session on this machine (dev host)" },
+    { c: "muted", text: "variables, functions, modules and cwd persist · ↑/↓ history · ctrl+L clear · ctrl+C resets shell" },
+  ]);
+  const [cwd, setCwd] = useState("");
+  const [input, setInput] = useState("");
+  const [hist, setHist] = useState<string[]>([]);
+  const [hi, setHi] = useState(-1);
+  const [busy, setBusy] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const sid = useRef<string>(crypto.randomUUID());
+  const busyRef = useRef(false);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [lines]);
+
+  const prompt = cwd ? `PS ${cwd}> ` : "PS> ";
+
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+
+  // Append streamed text, continuing the last line when it has no trailing newline.
+  // Lines prefixed with the runner's error sentinel are painted as errors.
+  const append = (c: string, text: string) => {
+    if (!text) return;
+    const ERR = "__SIPHER_ERR__";
+    const paint = (s: string) =>
+      s.startsWith(ERR) ? { c: "danger", text: s.slice(ERR.length) } : { c, text: s };
+    setLines((prev) => {
+      const next = prev.slice();
+      const parts = text.replace(/\r/g, "").split("\n");
+      const first = parts.shift() ?? "";
+      const last = next[next.length - 1];
+      if (first) {
+        if (last && last.partial && last.text !== "")
+          next[next.length - 1] = { ...last, text: last.text + first };
+        else if (last && last.partial) next[next.length - 1] = { ...paint(first), partial: true };
+        else next.push({ ...paint(first), partial: true });
+      }
+      for (const p of parts) next.push({ ...paint(p), partial: true });
+      return next;
+    });
+  };
+
+  async function run(raw: string) {
+    const cmd = raw.trim();
+    if (!cmd || busyRef.current) return;
+    if (cmd === "cls" || cmd === "clear") {
+      setLines([]);
+      setInput("");
+      return;
+    }
+    setLines((l) => [...l, { c: "fg", text: prompt + cmd }]);
+    setInput("");
+    setHi(-1);
+    setHist((h) => (h[h.length - 1] === cmd ? h : [...h, cmd]));
+    setBusy(true);
+    let finished = false;
+    try {
+      const res = await fetch("/api/ps", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({ cmd, session: sid.current }),
+      });
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const ev = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const dataLine = ev.split("\n").find((l) => l.startsWith("data: "));
+          if (!dataLine) continue;
+          let msg: PsEvent;
+          try {
+            msg = JSON.parse(dataLine.slice(6));
+          } catch {
+            continue;
+          }
+          if (msg.ready) {
+            if (msg.version) {
+              setLines((l) => {
+                const next = l.slice();
+                if (next[0]) next[0] = { c: "muted", text: `Windows PowerShell ${msg.version} · persistent session (state persists)` };
+                return next;
+              });
+            }
+            if (msg.cwd) setCwd(msg.cwd.replace(/\\+$/, ""));
+          } else if (typeof msg.chunk === "string") {
+            append("fg", msg.chunk);
+          } else if (typeof msg.err === "string") {
+            append("danger", msg.err);
+          } else if (msg.error) {
+            append("danger", msg.error);
+          } else if (msg.done) {
+            finished = true;
+            if (msg.cwd) setCwd(String(msg.cwd).replace(/\\+$/, ""));
+            setLines((prev) => {
+              const next = prev.slice();
+              const last = next[next.length - 1];
+              if (last?.partial) next[next.length - 1] = { ...last, partial: false };
+              return next;
+            });
+          }
+        }
+      }
+      if (!finished) append("warn", "(stream ended — shell may have exited)");
+    } catch (e) {
+      append("danger", `/api/ps unreachable (${String(e)}) — runner runs on the dev host`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function killShell() {
+    append("warn", "^C — resetting shell (variables and cwd cleared)");
+    try {
+      await fetch("/api/ps/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session: sid.current }),
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return (
+    <div
+      ref={scrollRef}
+      onClick={() => inputRef.current?.focus()}
+      className="min-h-0 flex-1 overflow-y-auto bg-background px-3 py-2 font-mono text-[11px] leading-[1.6]"
+    >
+      {lines.map((l, i) => (
+        <div key={i} className={colorFor[l.c]}>
+          {l.text || " "}
+        </div>
+      ))}
+      <div className="flex text-foreground/85">
+        <span className="shrink-0 whitespace-pre">{prompt}</span>
+        <input
+          ref={inputRef}
+          data-ps-input
+          autoFocus
+          spellCheck={false}
+          autoComplete="off"
+          placeholder={busy ? "running… (ctrl+C to reset)" : ""}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (!busy) void run(input);
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              if (hist.length) {
+                const n = hi < 0 ? hist.length - 1 : Math.max(0, hi - 1);
+                setHi(n);
+                setInput(hist[n]);
+              }
+            } else if (e.key === "ArrowDown") {
+              e.preventDefault();
+              if (hi >= 0) {
+                const n = hi + 1;
+                if (n >= hist.length) {
+                  setHi(-1);
+                  setInput("");
+                } else {
+                  setHi(n);
+                  setInput(hist[n]);
+                }
+              }
+            } else if (e.ctrlKey && (e.key === "l" || e.key === "L")) {
+              e.preventDefault();
+              setLines([]);
+            } else if (e.ctrlKey && (e.key === "c" || e.key === "C")) {
+              e.preventDefault();
+              if (busy) void killShell();
+              else setInput("");
+            }
+          }}
+          className="min-w-0 flex-1 bg-transparent font-mono text-[11px] text-foreground/85 caret-signal outline-none"
+        />
+      </div>
+    </div>
+  );
+}
+
 export function TerminalBody({ id, tele }: { id: string; tele?: Telemetry }) {
   const term = TERMINALS.find((t) => t.id === id);
+  if (id === "powershell") {
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-background">
+        {term?.host && (
+          <div className="hairline-b flex shrink-0 items-center gap-1.5 px-3 py-1 font-mono text-[10px] text-muted-foreground">
+            <Dot tone="ok" live /> {term.host}
+          </div>
+        )}
+        <PowerShellSession />
+      </div>
+    );
+  }
   let live: { c: string; text: string }[] = [];
   if (tele && id === "agent") {
     live = tele.events.slice(0, 8).map((e) => ({

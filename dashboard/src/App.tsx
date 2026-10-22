@@ -15,6 +15,7 @@ import { CustomerDashboard } from "@/components/mc/CustomerDashboard";
 import { CameraMap, MemoryViewer, MissionEditor, RosGraph } from "@/components/mc/Panels";
 import { PRESETS, TABS, TERMINALS, type PresetId } from "@/components/mc/data";
 import { useSipherTelemetry } from "@/components/mc/sipher";
+import { THEMES, useTheme } from "@/components/mc/theme";
 
 type Win = { id: string; title: string; rect: WinRect; z: number; display: number };
 type AppMode = "chooser" | "customer" | "developer";
@@ -40,6 +41,7 @@ export default function App() {
   });
   const [wins, setWins] = useState<Win[]>([]);
   const [termCollapsed, setTermCollapsed] = useState(false);
+  const [theme, setTheme] = useTheme();
 
   const applyPreset = (id: PresetId) => {
     const def = PRESETS.find((p) => p.id === id)!;
@@ -95,6 +97,12 @@ export default function App() {
         shortcut: "⌘J",
         run: () => setTermCollapsed((c) => !c),
       },
+      ...THEMES.map((t) => ({
+        id: `theme-${t.id}`,
+        group: "Theme",
+        label: `Theme: ${t.label}`,
+        run: () => setTheme(t.id),
+      })),
       {
         id: "pm",
         group: "Project",
@@ -128,7 +136,7 @@ export default function App() {
       case "mission-editor":
         return <MissionEditor />;
       case "camera-map":
-        return <CameraMap />;
+        return <CameraMap tele={tele} />;
       case "ros-graph":
         return <RosGraph />;
       case "memory-viewer":
@@ -227,6 +235,23 @@ export default function App() {
               </div>
             ))}
             <div className="ml-auto flex items-center gap-1 pr-2 text-muted-foreground">
+              <div className="mr-1 flex items-center overflow-hidden rounded-sm border border-hairline font-mono text-[10px]">
+                {THEMES.map((t) => (
+                  <button
+                    key={t.id}
+                    title={t.label}
+                    onClick={() => setTheme(t.id)}
+                    className={cn(
+                      "px-2 py-[3px]",
+                      theme === t.id
+                        ? "bg-signal/15 text-signal"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {t.id}
+                  </button>
+                ))}
+              </div>
               <button
                 onClick={() => setPaletteOpen(true)}
                 className="rounded-sm border border-hairline px-2 py-[3px] font-mono text-[10px] hover:text-foreground"

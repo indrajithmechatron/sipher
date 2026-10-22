@@ -1,0 +1,3 @@
+# Sipher Pico 2 W — stable symlink /dev/sipher-pico
+# Matches MicroPython USB CDC (RP2350 Pico 2 W)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="0005", SYMLINK+="sipher-pico", MODE="0660", GROUP="dialout"
