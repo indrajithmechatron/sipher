@@ -40,7 +40,11 @@ log "deployed $NEW"
 for svc in "${RESTART_SERVICES[@]}"; do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
         log "restarting $svc"
-        systemctl restart "$svc" 2>&1 | while read -r line; do log "svc[$svc]: $line"; done
+        if sudo -n systemctl restart "$svc" 2>&1 | while read -r line; do log "svc[$svc]: $line"; done; then
+            log "restarted $svc"
+        else
+            log "ERROR: restart failed: $svc"
+        fi
     fi
 done
 

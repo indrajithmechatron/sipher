@@ -1,0 +1,3 @@
+# Allow the sipher auto-deploy script (runs as User=sipher) to restart
+# the services it owns, without a password.
+sipher ALL=(root) NOPASSWD: /usr/bin/systemctl restart sipher-bridge, /usr/bin/systemctl restart sipher-command-endpoint, /usr/bin/systemctl restart sipher-logger, /usr/bin/systemctl restart sipher-instincts, /usr/bin/systemctl restart sipher-voice
