@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/menubar";
 import { ChevronRight, Minus, Square, X } from "lucide-react";
 import { Dot } from "./chrome";
+import type { Telemetry } from "./sipher";
 
 const MENUS: Record<string, string[][]> = {
   File: [
@@ -36,7 +37,10 @@ const MENUS: Record<string, string[][]> = {
   Help: [["Documentation", "Keyboard Map", "About Mission Control"]],
 };
 
-export function MenuBar({ crumbs }: { crumbs: string[] }) {
+export function MenuBar({ crumbs, tele }: { crumbs: string[]; tele: Telemetry }) {
+  const online = tele.piOnline && tele.picoOnline;
+  const active = tele.agents.filter((a) => a.state === "running").length;
+  const link = tele.linkMs != null ? `${tele.linkMs} ms` : "—";
   return (
     <header className="shrink-0 select-none">
       <div className="hairline-b flex h-9 items-center bg-rail pr-2 pl-3">
@@ -79,11 +83,11 @@ export function MenuBar({ crumbs }: { crumbs: string[] }) {
 
         <div className="ml-auto flex items-center gap-4">
           <div className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
-            <Dot tone="ok" live />
-            LINK 6 ms
+            <Dot tone={online ? "ok" : tele.piOnline ? "warn" : "danger"} live={online} />
+            LINK {link}
             <span className="text-hairline">|</span>
-            <Dot tone="signal" live />
-            AGENTS 4
+            <Dot tone={active > 0 ? "signal" : "muted"} live={active > 0} />
+            AGENTS {active}/{tele.agents.length}
           </div>
           <div className="flex items-center gap-1 text-muted-foreground">
             {[Minus, Square, X].map((Icon, i) => (

@@ -6,7 +6,7 @@ set -euo pipefail
 REPO_DIR="/home/sipher/sipher"
 BRANCH="main"
 LOG="/home/sipher/deploy/pull.log"
-RESTART_SERVICES=("sipher-bridge" "sipher-voice" "sipher-logger")
+RESTART_SERVICES=("sipher-bridge" "sipher-command-endpoint" "sipher-logger" "sipher-instincts" "sipher-voice")
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" | tee -a "$LOG"; }
 
