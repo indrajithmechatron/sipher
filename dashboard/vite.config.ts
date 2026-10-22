@@ -79,7 +79,7 @@ function opencodeSupervisor(): Plugin {
       } catch {}
       child = null;
     }
-    child = spawn(bin, ["serve", "--port", String(AI_PORT)], {
+    child = spawn(bin, ["serve", "--port", String(AI_PORT), "--hostname", "0.0.0.0"], {
       cwd: AI_REPO_ROOT,
       env: { ...process.env, OPENCODE_SERVER_PASSWORD: AI_PASSWORD },
       windowsHide: true,
@@ -399,8 +399,6 @@ export default defineConfig({
     // Fail fast when the robot is unreachable; otherwise dozens of hung sockets
     // starve the browser's per-origin connection pool (and the ps terminal).
     proxy: {
-      "/api": { target: api, timeout: 3000, proxyTimeout: 3000 },
-      "/command": { target: api, timeout: 5000, proxyTimeout: 5000 },
       "/api/ai": {
         target: `http://127.0.0.1:${AI_PORT}`,
         rewrite: (p) => p.replace(/^\/api\/ai/, ""),
@@ -420,12 +418,12 @@ export default defineConfig({
           });
         },
       },
+      "/api": { target: api, timeout: 3000, proxyTimeout: 3000 },
+      "/command": { target: api, timeout: 5000, proxyTimeout: 5000 },
     },
   },
   preview: {
     proxy: {
-      "/api": { target: api, timeout: 3000, proxyTimeout: 3000 },
-      "/command": { target: api, timeout: 5000, proxyTimeout: 5000 },
       "/api/ai": {
         target: `http://127.0.0.1:${AI_PORT}`,
         rewrite: (p) => p.replace(/^\/api\/ai/, ""),
@@ -438,6 +436,8 @@ export default defineConfig({
           });
         },
       },
+      "/api": { target: api, timeout: 3000, proxyTimeout: 3000 },
+      "/command": { target: api, timeout: 5000, proxyTimeout: 5000 },
     },
   },
 });

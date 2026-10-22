@@ -153,13 +153,15 @@ def _sensor_poller():
                 data = json.loads(resp.read().decode())
                 if data:
                     meta = data.pop("_meta", {}) or {}
-                    pico = meta.get("pico") or {}
+                    pico = meta.get("pico")
+                    pico_live = pico.get("live") if isinstance(pico, dict) else bool(pico)
+                    pico_age = pico.get("age_ms") if isinstance(pico, dict) else meta.get("pico_age_ms")
                     with _sensor_lock:
                         if any(k in data for k in ("mpu", "vl53_mm", "ina", "gps", "i2c0", "i2c1")):
                             _latest_sensor.clear()
                             _latest_sensor.update(data)
-                        _sensor_meta["pico_live"] = bool(pico.get("live"))
-                        _sensor_meta["pico_age_ms"] = pico.get("age_ms")
+                        _sensor_meta["pico_live"] = bool(pico_live)
+                        _sensor_meta["pico_age_ms"] = pico_age
                         _sensor_meta["bridge_ok"] = True
         except Exception:
             with _sensor_lock:

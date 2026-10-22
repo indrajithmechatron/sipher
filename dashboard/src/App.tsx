@@ -165,6 +165,7 @@ export default function App() {
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-background">
       <MenuBar
+        tele={tele}
         crumbs={[project?.robot ?? "sipher", presetDef.label, ...sel.path]}
       />
 

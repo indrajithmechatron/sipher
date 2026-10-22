@@ -157,7 +157,7 @@ export function AIChat() {
       const r = await fetch(`${AI}/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "" }),
+        body: JSON.stringify({}),
       });
       const j = await r.json();
       if (j?.id) {
