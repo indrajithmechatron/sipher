@@ -31,8 +31,8 @@ import urllib.request
 # Config
 # ---------------------------------------------------------------------------
 PORT = int(os.environ.get("SIPHER_PORT", "8888"))
-AI_BASE = os.environ.get("SIPHER_AI_BASE", "http://100.88.50.31:4096").rstrip("/")
-ASR_BASE = os.environ.get("SIPHER_ASR_BASE", "http://100.88.50.31:3000").rstrip("/")
+AI_BASE = os.environ.get("SIPHER_AI_BASE", "http://192.168.1.38:4096").rstrip("/")
+ASR_BASE = os.environ.get("SIPHER_ASR_BASE", "http://192.168.1.38:3000").rstrip("/")
 AI_PASSWORD = os.environ.get("SIPHER_AI_PASSWORD", "")
 if not AI_PASSWORD:
     try:
