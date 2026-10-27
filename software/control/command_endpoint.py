@@ -1034,8 +1034,8 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         body = self.rfile.read(min(content_length, 65536)) if content_length > 0 else b""
         sess = _session_from_request(self)
         if sess is not None:
-            # A logged-in session must be an admin; no private-client fallback.
-            if sess["role"] != "admin":
+            # A logged-in session must be at least admin (owner > admin > user).
+            if _ROLE_RANK.get(sess["role"], 0) < 1:
                 self.send_json({"error": "forbidden: admin role required", "rc": -1}, 403)
                 return
             allowed, why = True, ""
