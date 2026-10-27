@@ -31,8 +31,15 @@ if [ "$LOCAL" = "$REMOTE" ]; then
 fi
 
 # Pull
-log "pulling..."
-git pull origin "$BRANCH" 2>&1 | while read -r line; do log "pull: $line"; done
+if git merge-base --is-ancestor "$LOCAL" "$REMOTE"; then
+    log "pulling..."
+    git pull --ff-only origin "$BRANCH" 2>&1 | while read -r line; do log "pull: $line"; done
+else
+    # Local history is not an ancestor of origin (e.g. upstream was rewritten).
+    # This box is a deploy target, so follow origin rather than merging.
+    log "local history diverged from origin/$BRANCH - resetting to $REMOTE"
+    git reset --hard "$REMOTE" 2>&1 | while read -r line; do log "reset: $line"; done
+fi
 NEW=$(git rev-parse --short HEAD)
 log "deployed $NEW"
 
