@@ -517,7 +517,7 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         n = min(n, 30 * 1024 * 1024)
         return self.rfile.read(n)
 
-    def _ai_proxy(self, base: str):
+    def _ai_proxy(self, base: str, strip: bool = True):
         """Forward /api/ai/* to the PC's opencode (or ASR) backend."""
         if self.path == "/api/ai/start":
             try:
@@ -531,7 +531,8 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
                 return
         body = self._read_body()
         ctype = self.headers.get("Content-Type", "application/json")
-        target = base + self.path
+        path = self.path.replace("/api/ai", "", 1) if strip else self.path
+        target = base + path
         req = urllib.request.Request(target, data=body if body else None, method=self.command)
         req.add_header("Authorization", AI_AUTH)
         req.add_header("Content-Type", ctype)
@@ -603,7 +604,7 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/bridge_cmd":
             self.handle_bridge_cmd()
         elif self.path == "/api/ai/transcribe":
-            self._ai_proxy(ASR_BASE)
+            self._ai_proxy(ASR_BASE, strip=False)
         elif self.path == "/api/ai" or self.path.startswith("/api/ai/"):
             self._ai_proxy(AI_BASE)
         elif self.path.startswith("/api/rag"):
