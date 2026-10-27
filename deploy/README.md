@@ -9,7 +9,7 @@ Repo location on the Pi: `/home/sipher/sipher`.
 |---|---|
 | `update.sh` | Fetch + pull `main`, restart active services (falls back to `reset --hard` if upstream history was rewritten) |
 | `ssh-key-setup.ps1` | Install the workstation's ed25519 key on the Pi (key-only SSH) |
-| `pi-firewall.sh` | Idempotent UFW baseline (SSH from LAN, dashboard port 8888) |
+| `pi-firewall.sh` | Idempotent UFW baseline (SSH from LAN; dashboard port 8888 from LAN + tailnet) |
 | `systemd/` | Units installed on the Pi |
 | `sudoers.d/sipher-deploy` | Passwordless restart for exactly the Sipher services |
 | `udev/99-sipher-pico.rules` | `/dev/sipher-pico` symlink for the Pico |
@@ -90,4 +90,9 @@ and monitor) before running it.
   local commits there are always discarded.
 - **Services** are restarted only when they are active, using the narrow
   `sudoers.d/sipher-deploy` rule — no blanket passwordless sudo.
+- **Firewall scope.** `pi-firewall.sh` opens `22/tcp` from the LAN only, and
+  `8888/tcp` (dashboard, `/command`, `/api/rag/*`) from the LAN plus Tailscale
+  (`100.64.0.0/10`, interface `tailscale0`). It deletes any older blanket
+  `ufw allow 8888/tcp` rule and fails if one is still present, so remote access
+  goes through the tailnet rather than the public internet.
 

@@ -98,6 +98,9 @@ Full API, corpus rules, CLI and configuration: `software/rag/README.md`.
   the repo/log dir, `tailscale`), executed with `shell=False`. Set
   `SIPHER_COMMAND_TOKEN` to require `X-Sipher-Token`; without it only
   loopback/private clients are accepted.
+- **The dashboard port is not public.** `deploy/pi-firewall.sh` allows `8888`
+  from the LAN and the tailnet (`100.64.0.0/10`, `tailscale0`) only, and fails
+  if a blanket `8888/tcp` rule is present.
 - **CI scans** (`.github/workflows/security.yml`) run Gitleaks over full
   history, Semgrep SAST and the OSV dependency scan on every push.
 - Leaked values were purged from history with `git filter-repo`; rotate any
