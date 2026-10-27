@@ -70,4 +70,4 @@ generates a new one.
 | `/api/bridge_cmd` | POST | Forward command to Pico |
 | `/api/rag/search` | GET | BM25 search over docs, reports and manuals |
 | `/api/rag/context` | GET | Cited excerpts as an LLM prompt block |
-| `/command` | POST | Run restricted shell command |
+| `/command` | POST | Run an allowlisted argv (no shell) |

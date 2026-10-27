@@ -12,14 +12,18 @@ Architecture:
   Dashboard (browser) -> command_endpoint.py (:8888) -> bridge.py (:5000) -> Pico (USB serial)
 """
 
+import hmac
 import http.server
+import ipaddress
 import json
+import os
+import pathlib
+import re
+import shlex
 import subprocess
+import sys
 import threading
 import time
-import os
-import sys
-import pathlib
 import urllib.request
 
 # ---------------------------------------------------------------------------
@@ -29,6 +33,7 @@ PORT = int(os.environ.get("SIPHER_PORT", "8888"))
 PICO_SERIAL = os.environ.get("SIPHER_PICO_SERIAL", "/dev/ttyACM0")
 PICO_BAUD = int(os.environ.get("SIPHER_PICO_BAUD", "115200"))
 REPO_DIR = os.environ.get("SIPHER_REPO_DIR", "/home/sipher/sipher")
+LOG_DIR = os.environ.get("SIPHER_LOG_DIR", "/home/sipher/logs")
 BRIDGE_SENSOR_URL = os.environ.get("SIPHER_BRIDGE_SENSOR_URL", "http://localhost:5001/sensor")
 BRIDGE_MAP_URL = os.environ.get("SIPHER_BRIDGE_MAP_URL", "http://localhost:5001/map")
 BRIDGE_CMD_URL = os.environ.get("SIPHER_BRIDGE_CMD_URL", "http://localhost:5001/api/bridge_cmd")
@@ -223,22 +228,182 @@ def load_dashboard():
 
 # ---------------------------------------------------------------------------
 # Restricted command execution
+#
+# /command is reachable from the LAN (the dashboard runs on another host), so
+# it is NOT a shell. The request string is parsed into an argv with shlex, the
+# program must be one of the checkers below, and every argument is validated.
+# Nothing else runs. `python3 <anything>` is deliberately not allowed, and no
+# argument can be interpreted by a shell (`;`, `&&`, `$(...)`, newlines, ...).
 # ---------------------------------------------------------------------------
-_ALLOWED_PREFIXES = [
-    "systemctl ", "git ", "python3 ", "cat /home/sipher/",
-    "tailscale ", "cd /home/sipher/sipher && git pull",
-]
+MAX_COMMAND_CHARS = 240
+MAX_TIMEOUT_S = 60
+
+# Optional shared secret. When set, /command requires `X-Sipher-Token`. When
+# unset, only loopback/private/link-local clients may call it (no port-forward
+# exposure), and a warning is printed at startup.
+COMMAND_TOKEN = os.environ.get("SIPHER_COMMAND_TOKEN", "").strip()
+
+_SIPHER_UNIT = re.compile(r"^sipher-[a-z0-9][a-z0-9@._-]*$")
+_SYSTEMCTL_VERBS = {"status", "is-active", "is-enabled", "show", "list-units", "list-timers"}
+_GIT_SUBS = {"status", "log", "diff", "show", "rev-parse", "remote",
+             "describe", "ls-files", "pull", "fetch"}
+# Flags that make git execute another program (pager, diff driver, hook helper,
+# upload/receive pack, alternate config, alternate repo) rather than read data.
+_GIT_FORBIDDEN = {
+    "-c", "-O", "--exec-path", "--upload-pack", "--receive-pack",
+    "--open-files-in-pager", "--ext-diff", "--textconv", "--pager",
+    "--config-env", "--git-dir", "--work-tree", "--namespace", "--super-prefix",
+}
+_GIT_FLAG = re.compile(r"^(?:--[A-Za-z][A-Za-z0-9-]*(?:=\S*)?|-[A-Za-z]|-[0-9]+)$")
+
+
+def _check_systemctl(args):
+    """systemctl <verb> [flags] [sipher-* unit] — no arbitrary units, no verbs
+    that change state (start/stop/restart/enable/disable need root anyway and
+    belong to deploy/update.sh, which has its own sudoers rule)."""
+    out = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("--no-pager", "--value", "--all", "--quiet", "--full"):
+            out.append(a)
+            i += 1
+        elif a in ("-n", "--lines", "-p", "--property"):
+            if i + 1 >= len(args):
+                return None, f"systemctl {a} needs a value"
+            out += [a, args[i + 1]]
+            i += 2
+        elif a.startswith("--lines=") and a.split("=", 1)[1].isdigit():
+            out.append(a)
+            i += 1
+        elif a.startswith("--property="):
+            out.append(a)
+            i += 1
+        elif a in _SYSTEMCTL_VERBS or _SIPHER_UNIT.match(a):
+            out.append(a)
+            i += 1
+        else:
+            return None, f"systemctl argument not allowed: {a}"
+    verbs = [a for a in out if a in _SYSTEMCTL_VERBS]
+    units = [a for a in out if _SIPHER_UNIT.match(a)]
+    if not verbs:
+        return None, "systemctl needs a verb"
+    if len(verbs) > 1:
+        return None, "one systemctl verb at a time"
+    if verbs[0] in ("status", "is-active", "is-enabled", "show") and not units:
+        return None, "systemctl needs a sipher-* unit"
+    return ["systemctl"] + out, None
+
+
+def _check_git(args):
+    """Read-only git plus pull/fetch, always inside REPO_DIR."""
+    argv = ["git"]
+    i = 0
+    if args[:1] == ["-C"]:
+        if len(args) < 2 or not _same_dir(args[1], REPO_DIR):
+            return None, "git -C is only allowed for the repository"
+        argv += args[:2]
+        i = 2
+    if i >= len(args) or args[i] not in _GIT_SUBS:
+        return None, f"git subcommand not allowed: {args[i] if i < len(args) else '(none)'}"
+    argv.append(args[i])
+    for a in args[i + 1:]:
+        if a.split("=", 1)[0] in _GIT_FORBIDDEN:
+            return None, f"git flag not allowed: {a}"
+        if a.startswith("-") and a != "--" and not _GIT_FLAG.match(a):
+            return None, f"git flag not allowed: {a}"
+    return argv + args[i + 1:], None
+
+
+def _same_dir(path, base):
+    try:
+        return os.path.realpath(path) == os.path.realpath(base)
+    except (OSError, ValueError):
+        return False
+
+
+def _inside(path, base):
+    try:
+        p = os.path.realpath(path)
+        b = os.path.realpath(base)
+    except (OSError, ValueError):
+        return False
+    return p == b or p.startswith(b + os.sep)
+
+
+def _check_cat(args):
+    """cat a single file inside the repository or the log directory."""
+    if len(args) != 1:
+        return None, "cat takes exactly one path"
+    p = args[0]
+    full = p if os.path.isabs(p) else os.path.join(REPO_DIR, p)
+    if not (_inside(full, REPO_DIR) or _inside(full, LOG_DIR)):
+        return None, "path outside the repository/log directory"
+    return ["cat", full], None
+
+
+def _check_tailscale(args):
+    if not args:
+        return None, "tailscale needs a subcommand"
+    sub, rest = args[0], args[1:]
+    if sub == "status" and all(a in ("--json", "--peers", "--self") for a in rest):
+        return ["tailscale", sub] + rest, None
+    if sub == "ip" and all(a in ("-4", "-6") for a in rest):
+        return ["tailscale", sub] + rest, None
+    if sub == "version" and not rest:
+        return ["tailscale", sub], None
+    return None, f"tailscale subcommand not allowed: {sub}"
+
+
+_CHECKERS = {
+    "systemctl": _check_systemctl,
+    "git": _check_git,
+    "cat": _check_cat,
+    "tailscale": _check_tailscale,
+}
+
+
+def build_argv(cmd):
+    """Parse + validate a command. Returns (argv, None) or (None, reason)."""
+    if not isinstance(cmd, str):
+        return None, "command must be a string"
+    if not cmd.strip():
+        return None, "empty command"
+    if len(cmd) > MAX_COMMAND_CHARS:
+        return None, f"command longer than {MAX_COMMAND_CHARS} characters"
+    if any(c in cmd for c in "\x00\n\r"):
+        return None, "control characters not allowed"
+    if any(c in cmd for c in ";&|`$<>"):
+        return None, "shell metacharacters not allowed"
+    try:
+        parts = shlex.split(cmd)
+    except ValueError as e:
+        return None, f"cannot parse command: {e}"
+    if not parts:
+        return None, "empty command"
+    checker = _CHECKERS.get(parts[0])
+    if checker is None:
+        return None, f"program not allowed: {parts[0]}"
+    return checker(parts[1:])
+
 
 def is_safe_command(cmd: str) -> bool:
-    cmd_clean = cmd.strip().split("\n")[0].strip()
-    return any(cmd_clean.startswith(p) for p in _ALLOWED_PREFIXES)
+    argv, _ = build_argv(cmd)
+    return argv is not None
+
 
 def run_command(cmd: str, timeout: int = 30) -> dict:
-    if not is_safe_command(cmd):
-        return {"error": f"command not allowed: {cmd[:80]}", "rc": -1}
+    argv, reason = build_argv(cmd)
+    if argv is None:
+        return {"error": f"command not allowed: {reason}", "rc": -1}
+    try:
+        t = float(timeout)
+    except (TypeError, ValueError):
+        t = 30.0
+    t = max(1.0, min(float(MAX_TIMEOUT_S), t))
     try:
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=timeout,
+            argv, shell=False, capture_output=True, text=True, timeout=t,
             cwd=REPO_DIR,
         )
         return {
@@ -247,9 +412,30 @@ def run_command(cmd: str, timeout: int = 30) -> dict:
             "stderr": result.stderr[-5000:],
         }
     except subprocess.TimeoutExpired:
-        return {"error": f"command timed out after {timeout}s", "rc": -1}
+        return {"error": f"command timed out after {t:g}s", "rc": -1}
     except Exception as e:
         return {"error": str(e), "rc": -1}
+
+
+def _client_address_ok(addr: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(str(addr).split("%", 1)[0])
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_loopback or ip.is_private or ip.is_link_local
+
+
+def command_authorized(addr: str, token: str) -> tuple:
+    """(allowed, reason) for a /command request."""
+    if COMMAND_TOKEN:
+        if token and hmac.compare_digest(str(token), COMMAND_TOKEN):
+            return True, ""
+        return False, "missing or invalid X-Sipher-Token"
+    if not _client_address_ok(addr):
+        return False, "non-private client (set SIPHER_COMMAND_TOKEN to allow)"
+    return True, ""
 
 # ---------------------------------------------------------------------------
 # HTTP Request Handler
@@ -266,7 +452,7 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Sipher-Token")
         self.end_headers()
         self.wfile.write(body)
 
@@ -309,7 +495,7 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Sipher-Token")
         self.end_headers()
 
     def do_GET(self):
@@ -442,12 +628,28 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
             self.send_json({"error": f"bridge not reachable: {e}"})
 
     def handle_command(self):
-        """Execute a shell command (restricted to allowed list)."""
-        content_length = int(self.headers.get("Content-Length", 0))
-        if content_length == 0:
+        """Execute one allowlisted argv (never a shell) — see build_argv()."""
+        try:
+            content_length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            content_length = 0
+        # Drain the body first (bounded) so rejections don't reset the socket
+        # while the client is still writing.
+        body = self.rfile.read(min(content_length, 65536)) if content_length > 0 else b""
+        allowed, why = command_authorized(
+            self.client_address[0], self.headers.get("X-Sipher-Token", "")
+        )
+        if not allowed:
+            print(f"[http] rejected /command from {self.client_address[0]}: {why}", flush=True)
+            self.send_json({"error": f"forbidden: {why}", "rc": -1}, 403)
+            return
+        if content_length <= 0:
             self.send_json({"error": "empty body"}, 400)
             return
-        body = self.rfile.read(content_length)
+        if content_length > 4096:
+            self.close_connection = True
+            self.send_json({"error": "body too large"}, 413)
+            return
         try:
             req = json.loads(body)
         except json.JSONDecodeError:
@@ -465,6 +667,14 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 def main():
     load_dashboard()
+    if COMMAND_TOKEN:
+        print("[command_endpoint] /command requires X-Sipher-Token", flush=True)
+    else:
+        print(
+            "[command_endpoint] WARNING: SIPHER_COMMAND_TOKEN is unset - /command "
+            "accepts private/LAN clients only. Set a token before exposing the port.",
+            flush=True,
+        )
     server = http.server.HTTPServer(("0.0.0.0", PORT), SipherHandler)
     print(f"[command_endpoint] listening on 0.0.0.0:{PORT}", flush=True)
     try:

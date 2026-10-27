@@ -12,6 +12,9 @@ Environment=PYTHONPATH=/home/sipher/sipher/software
 Environment=SIPHER_PICO_SERIAL=/dev/sipher-pico
 Environment=SIPHER_PORT=8888
 Environment=PI_IP=192.168.1.37
+# Optional: SIPHER_COMMAND_TOKEN=... to require X-Sipher-Token on /command.
+# Absent file is fine (see software/control/README.md).
+EnvironmentFile=-/etc/sipher.env
 ExecStart=/usr/bin/python3 -m control.command_endpoint
 Restart=always
 RestartSec=5
