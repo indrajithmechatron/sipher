@@ -153,7 +153,7 @@ sudo systemctl restart sipher-command-endpoint
 
 | Method | Address |
 |---|---|
-| SSH | `ssh sipher@192.168.1.35` (password: `***REMOVED***`) |
+| SSH | `ssh sipher@192.168.1.35` (password shared separately — ask Indra) |
 | Tailscale | `ssh sipher@100.95.37.114` |
 | Dashboard (when running) | `http://192.168.1.35:5001` |
 | Bridge API | `http://192.168.1.35:5001/api/sensors` |
