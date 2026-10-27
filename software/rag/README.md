@@ -9,6 +9,10 @@ RAG here means *retrieval*: the service returns the most relevant passages with
 chat or any client) — feed it `/api/rag/context` and it answers from real
 excerpts instead of guessing.
 
+**Status:** active. Mounted inside `control.command_endpoint` on the Pi
+(`:8888`); the dashboard reaches it through the existing `/api` proxy. Tests:
+`software/rag/tests/`.
+
 ## What gets indexed
 
 | Source | Detail |

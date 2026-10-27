@@ -9,7 +9,8 @@ local server.
 - Windows 10/11
 - Node.js 18+ (https://nodejs.org)
 - Microsoft Edge or Google Chrome (preinstalled on most systems)
-- Network access to the robot Pi (`192.168.1.35`) for live telemetry
+- Network access to the robot Pi — `SIPHER_API`, default
+  `http://192.168.1.37:8888` (set `SIPHER_API` for a different address)
 
 ## Install (one time)
 
@@ -41,24 +42,27 @@ startup entry so the server starts automatically at login.
 | File | Purpose |
 |---|---|
 | `Launch-SipherDashboard.ps1` | Health-check server, open app window |
-| `start-dashboard.ps1` | Build + serve loop with auto-restart |
+| `start-dashboard.ps1` | Sync dependencies, then keep the dev server alive (auto-restart) |
 | `Sipher Dashboard.cmd` | Double-click entry point |
 | `Install-DesktopShortcut.ps1` | Creates Desktop + Startup shortcuts |
-| `preview.log` | Server log (auto-rotated on manual restart) |
+| `dev.log` | Vite output, appended across restarts |
+| `launcher.log`, `launcher.err.log` | Launcher stdout/stderr |
 
 ## Server details
 
 - URL: `http://localhost:3000`
-- Proxy: `/api` and `/command` → Pi `http://192.168.1.35:8888`
+- Proxy: `/api` and `/command` → `SIPHER_API` (default `http://192.168.1.37:8888`)
 - AI backend: `127.0.0.1:4096` (loopback only) with a per-user secret generated
   on first run — see `dashboard/README.md`
 - Auto-restart: if the Vite process exits, it restarts after 2 seconds
+- Dependencies: `start-dashboard.ps1` runs `npm install` whenever
+  `package.json` changes (tracked by `.deps-stamp`)
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| Blank page | Wait 5s; server may be rebuilding. Check `preview.log` |
+| Blank page | Wait 5s; server may be rebuilding. Check `dev.log` |
 | Port already in use | Launcher kills the old listener automatically |
-| No live sensor data | Ensure Pi is reachable: `ping 192.168.1.35` |
+| No live sensor data | Ensure the Pi answers: `ping 192.168.1.37` (or your `SIPHER_API` host) |
 | Want a full browser tab | Open `http://localhost:3000` manually |

@@ -4,6 +4,19 @@ title = "sipher secret detection configuration"
 [extend]
 useDefault = true
 
+# Sipher-specific patterns: the two shapes that leaked before.
+[[rules]]
+id = "sipher-ai-password-fallback"
+description = "Hardcoded fallback for the dashboard AI backend password"
+regex = '''AI_PASSWORD\s*=\s*[^\n?]*\?\?\s*["'][^"']{4,}["']'''
+tags = ["sipher", "password"]
+
+[[rules]]
+id = "sipher-documented-password"
+description = "Login password written into documentation as a literal"
+regex = '''(?i)(?:password|passwd|pwd)["']?[ \t]*[:=][ \t]*["'`][^"'`\r\n]{6,}["'`]'''
+tags = ["sipher", "password"]
+
 [allowlist]
 description = "Global allowlist for non-sensitive public references"
 paths = [

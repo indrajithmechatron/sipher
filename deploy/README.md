@@ -7,7 +7,7 @@ Repo location on the Pi: `/home/sipher/sipher`.
 
 | Path | Purpose |
 |---|---|
-| `update.sh` | Fetch + pull `main`, restart active services |
+| `update.sh` | Fetch + pull `main`, restart active services (falls back to `reset --hard` if upstream history was rewritten) |
 | `ssh-key-setup.ps1` | Install the workstation's ed25519 key on the Pi (key-only SSH) |
 | `pi-firewall.sh` | Idempotent UFW baseline (SSH from LAN, dashboard port 8888) |
 | `systemd/` | Units installed on the Pi |
@@ -78,3 +78,16 @@ and monitor) before running it.
 ## Log
 
 `/home/sipher/deploy/pull.log` — all fetch/pull/restart activity.
+
+## Behaviour notes
+
+- **Fast-forward only.** `update.sh` pulls with `--ff-only` so a dirty Pi can
+  never silently produce a merge commit.
+- **Rewritten upstream.** If local `HEAD` is no longer an ancestor of
+  `origin/main` (history was scrubbed, as when credentials are purged), the
+  script logs `local history diverged` and resets to `origin/main` instead of
+  failing and leaving the services on old code. The Pi is a deploy target, so
+  local commits there are always discarded.
+- **Services** are restarted only when they are active, using the narrow
+  `sudoers.d/sipher-deploy` rule — no blanket passwordless sudo.
+

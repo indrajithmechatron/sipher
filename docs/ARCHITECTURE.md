@@ -63,6 +63,12 @@ flowchart LR
 
 **Interface to Layer 2:** Structured action requests (Python dataclass / JSON over local socket or ROS 2 topic).
 
+**Retrieval service (`software/rag/`):** read-only BM25 over repo docs,
+`docs/reports/`, the telemetry log and ingested manuals, exposed at
+`/api/rag/*` by the command endpoint so the dashboard proxy reaches it. It may
+write only inside `.rag/`, and must never touch serial, GPIO, systemd or the
+network — retrieval is a search index, not an actuator.
+
 ---
 
 ### Layer 2 — Robot Runtime (`software/robot/`)
@@ -184,6 +190,15 @@ flowchart LR
 3. **Watchdog on firmware:** Pico 2 W must neutralize servos within 250 ms of lost Pi heartbeat.
 4. **Joint limits enforced in control layer:** Every angle must be validated before reaching firmware.
 5. **Emergency-stop is orthogonal:** E-Stop must work even if ROS 2, voice, or control layer crash.
+6. **Secrets stay outside the tree:** credentials are generated per user and
+   stored in the OS profile (`%LOCALAPPDATA%\Sipher\`, `~/.config/sipher/`), never
+   committed. Admin access to the Pi is key-only SSH
+   (`deploy/ssh-key-setup.ps1`); CI runs Gitleaks over full history.
+7. **Retrieval cannot actuate:** `software/rag/` is read-only over the repo and
+   writes only inside `.rag/`. No serial, GPIO, shell or network access.
+8. **Remote commands are argv, never a shell:** `/command` parses with `shlex`,
+   runs only allowlisted programs with `shell=False`, and requires
+   `X-Sipher-Token` when `SIPHER_COMMAND_TOKEN` is set.
 
 ---
 
@@ -217,7 +232,8 @@ Following: **Inspect → Map → Define Destination → Migrate → Validate →
 
 | Bus | Devices | Addresses / Pins |
 |---|---|---|
-| I2C0 (100 kHz) | MPU6050, PCA9685, INA219, VL53L0X | 0x68, 0x40, 0x41, 0x29 — GP8/GP9 |
+| I2C0 (100 kHz) | PCA9685, INA219, VL53L0X | 0x40, 0x41, 0x29 — SDA GP8, SCL GP9 |
+| I2C1 (100 kHz) | MPU6050 | 0x68 — SDA GP2, SCL GP3 |
 | UART0 (9600) | NEO-6M GPS | GP0 TX, GP1 RX |
 | SPI0 (shared) | ILI9341 TFT + nRF24L01+ | CS GP17 / CSN GP20, SCK GP18, MOSI GP19, MISO GP16 |
 

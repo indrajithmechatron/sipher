@@ -2,16 +2,23 @@
 
 > **Board:** Raspberry Pi Pico 2 W (RP2350) 40-pin. All logic 3.3V. Common GND star at Pico GND. VBUS 5V only for PCA9685 servo rail / TFT VCC if 5V-tolerant.
 
-## I2CBus Shared (I2C0) — 4 devices
+## I2C — two buses, firmware probes both
 
-| Device | VCC | GND | SDA | SCL | Addr | Note |
-|--------|-----|-----|-----|-----|------|------|
-| MPU6050 | 3V3 | GND | GP8 | GP9 | 0x68 (AD0 GND) | INT → GP2 |
-| VL53LOX | 3V3 | GND | GP8 | GP9 | 0x29 | XSHUT → GP3 |
-| PCA9685 | 3V3 (logic) | GND | GP8 | GP9 | 0x40 | OE → GND (always on), 5V servo rail separate |
-| INA219 A0 soldered | 3V3 | GND | GP8 | GP9 | **0x41** (A0=VCC) | Avoids clash with PCA 0x40 |
+`pico_main.py` opens `I2C0` on GP8/GP9 and `I2C1` on GP2/GP3, then picks the bus
+that actually answers for each address (`_bus_for()`). Either bus works for a
+device; the bench wiring is split as follows.
 
-**Bus:** `I2C0 SDA GP8` + `I2C0 SCL GP9`, 4.7k pull-ups already on boards. All share same bus.
+| Bus | SDA | SCL | Devices |
+|---|---|---|---|
+| `I2C0` (100 kHz) | GP8 | GP9 | PCA9685 `0x40`, INA219 `0x41` (A0 → VCC), VL53L0X `0x29` |
+| `I2C1` (100 kHz) | GP2 | GP3 | MPU6050 `0x68` (AD0 → GND) |
+
+4.7k pull-ups are already fitted on the breakout boards.
+
+- `VL53L0X` XSHUT is tied high: the firmware never drives it, so the sensor is
+  always enabled. GP3 is I2C1 SCL, not XSHUT.
+- MPU6050 `INT` is not wired. GP2 is I2C1 SDA; the firmware polls instead of
+  using the interrupt.
 
 ## UART — GPS
 
@@ -46,12 +53,12 @@ Pico 2W            sipher peripherals
 ------             -------------------
 GP0  (UART0 TX) → GPS RX
 GP1  (UART0 RX) ← GPS TX
-GP2              → MPU INT / I2C1 SDA
-GP3              → VL53 XSHUT / I2C1 SCL
+GP2  (I2C1 SDA) → MPU6050 SDA
+GP3  (I2C1 SCL) → MPU6050 SCL
 GP4              → TFT DC/RS
 GP5              → TFT RESET
-GP8  (I2C0 SDA) ↔ PCA/INA/VL53 SDA (alt)
-GP9  (I2C0 SCL) ↔ PCA/INA/VL53 SCL (alt)
+GP8  (I2C0 SDA) ↔ PCA / INA / VL53 SDA
+GP9  (I2C0 SCL) ↔ PCA / INA / VL53 SCL
 GP16 (SPI0 MISO)↔ Shared SPI0 MISO (TFT SDO & nRF MISO)
 GP17 (SPI0 CSn) → TFT CS
 GP18 (SPI0 SCK) → Shared SPI0 SCK (TFT SCK & nRF SCK)
@@ -73,10 +80,18 @@ VBUS (5V)        → PCA V+ / servo rail / external UBEC
 
 ## Check
 
+I2C is on the Pico, so scan it from the Pico — not with `i2cdetect` on the Pi:
+
+```python
+# mpremote connect /dev/ttyACM0 exec "import machine; print([hex(a) for a in machine.I2C(0, sda=machine.Pin(8), scl=machine.Pin(9)).scan()]); print([hex(a) for a in machine.I2C(1, sda=machine.Pin(2), scl=machine.Pin(3)).scan()])"
+# I2C0: 0x29 VL53, 0x40 PCA, 0x41 INA
+# I2C1: 0x68 MPU
+```
+
 ```bash
-i2cdetect -y 1  # expect 0x29 VL53, 0x40 PCA, 0x41 INA, 0x68 MPU
-ls -la /dev/ttyACM*  # Pico
-cat /dev/serial0  # GPS NMEA
+ls -la /dev/ttyACM*             # Pico on the Pi
+cat /dev/serial0                # GPS NMEA (Pi-side UART, if wired there)
+curl -s localhost:5001/sensor   # parsed telemetry from the bridge
 ```
 
 Wire star-GND, keep I2C <20 cm, SPI <10 cm, twist nRF power.

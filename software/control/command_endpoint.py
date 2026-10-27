@@ -36,7 +36,6 @@ REPO_DIR = os.environ.get("SIPHER_REPO_DIR", "/home/sipher/sipher")
 LOG_DIR = os.environ.get("SIPHER_LOG_DIR", "/home/sipher/logs")
 BRIDGE_SENSOR_URL = os.environ.get("SIPHER_BRIDGE_SENSOR_URL", "http://localhost:5001/sensor")
 BRIDGE_MAP_URL = os.environ.get("SIPHER_BRIDGE_MAP_URL", "http://localhost:5001/map")
-BRIDGE_CMD_URL = os.environ.get("SIPHER_BRIDGE_CMD_URL", "http://localhost:5001/api/bridge_cmd")
 
 _THIS_DIR = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
 DASHBOARD_PATH = _THIS_DIR.parent / "dashboard" / "index.html"

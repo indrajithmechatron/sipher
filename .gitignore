@@ -19,6 +19,9 @@ hardware/**/*.step
 hardware/**/*.stl
 hardware/**/*.gcode
 
+# Generated firmware assets (flashed to the Pico separately)
+*.rgb565
+
 # Local secrets (AI backend password, etc.)
 .secrets/
 
