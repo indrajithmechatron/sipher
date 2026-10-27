@@ -36,7 +36,7 @@ ASR_BASE = os.environ.get("SIPHER_ASR_BASE", "http://192.168.1.38:3000").rstrip(
 AI_PASSWORD = os.environ.get("SIPHER_AI_PASSWORD", "")
 if not AI_PASSWORD:
     try:
-        AI_PASSWORD = (pathlib.Path(REPO_DIR) / ".ai_password").read_text(encoding="utf-8").strip()
+        AI_PASSWORD = (pathlib.Path(os.environ.get("SIPHER_REPO_DIR", "/home/sipher/sipher")) / ".ai_password").read_text(encoding="utf-8").strip()
     except Exception:
         AI_PASSWORD = ""
 AI_AUTH = "Basic " + base64.b64encode(("opencode:" + AI_PASSWORD).encode("utf-8")).decode("ascii")
