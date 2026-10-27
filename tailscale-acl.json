@@ -1,0 +1,43 @@
+{
+  "tagOwners": {
+    "tag:sipher-pi": ["autogroup:admin"],
+    "tag:sipher-pc": ["autogroup:admin"]
+  },
+  "groups": {
+    "group:sipher-admins": [
+      "indrajithmechatron@gmail.com"
+    ],
+    "group:sipher-users": []
+  },
+  "acls": [
+    {
+      "action": "accept",
+      "src": ["group:sipher-admins"],
+      "dst": ["tag:sipher-pi:*", "tag:sipher-pc:*"]
+    },
+    {
+      "action": "accept",
+      "src": ["group:sipher-users"],
+      "dst": ["tag:sipher-pi:8888"]
+    }
+  ],
+  "ssh": [
+    {
+      "action": "accept",
+      "src": ["group:sipher-admins"],
+      "dst": ["tag:sipher-pi"],
+      "users": ["sipher", "root"]
+    },
+    {
+      "action": "accept",
+      "src": ["group:sipher-admins"],
+      "dst": ["tag:sipher-pc"],
+      "users": ["autogroup:nonroot", "root"]
+    }
+  ],
+  "autoApprovers": {
+    "routes": {
+      "192.168.1.0/24": ["tag:sipher-pi"]
+    }
+  }
+}
