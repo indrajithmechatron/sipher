@@ -13,6 +13,9 @@ import http from "node:http";
 const api = process.env.SIPHER_API ?? "http://192.168.1.37:8888";
 
 const LOOPBACK = /^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/;
+// Browsers allow cross-origin WebSockets, so a random page could otherwise
+// open a local PowerShell. Only the app itself (localhost) may attach.
+const APP_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const DONE_PREFIX = "__SIPHER_DONE__|";
 const READY_PREFIX = "__SIPHER_READY__|";
 const ERR_PREFIX = "__SIPHER_ERR__";
@@ -331,6 +334,11 @@ function powershellPty(): Plugin {
         socket.destroy();
         return;
       }
+      const origin = req.headers.origin;
+      if (origin && !APP_ORIGIN.test(origin)) {
+        socket.destroy();
+        return;
+      }
       void loadPty().then((pty) => {
         if (!pty) {
           socket.write(
@@ -356,6 +364,11 @@ function powershellPty(): Plugin {
       if (!LOOPBACK.test(req.socket.remoteAddress ?? "")) {
         res.statusCode = 403;
         return res.end("loopback only");
+      }
+      const origin = req.headers.origin;
+      if (origin && !APP_ORIGIN.test(origin)) {
+        res.statusCode = 403;
+        return res.end("origin not allowed");
       }
       const s = sessions.get(u.searchParams.get("session") ?? "");
       res.setHeader("Content-Type", "application/json");
