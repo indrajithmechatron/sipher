@@ -24,6 +24,7 @@ hardware/**/*.gcode
 
 # Local secrets (AI backend password, etc.)
 .secrets/
+.ai_password
 
 # Retrieval index (rebuilt on demand)
 .rag/
