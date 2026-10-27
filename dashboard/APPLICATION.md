@@ -50,6 +50,8 @@ startup entry so the server starts automatically at login.
 
 - URL: `http://localhost:3000`
 - Proxy: `/api` and `/command` → Pi `http://192.168.1.35:8888`
+- AI backend: `127.0.0.1:4096` (loopback only) with a per-user secret generated
+  on first run — see `dashboard/README.md`
 - Auto-restart: if the Vite process exits, it restarts after 2 seconds
 
 ## Troubleshooting

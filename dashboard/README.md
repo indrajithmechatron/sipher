@@ -39,6 +39,23 @@ Copy `dist/` to Pi and serve via `command_endpoint.py`.
 - **Icons:** lucide-react
 - **Data:** `sipher.ts` hook polls Pi bridge API `/api/sensors`
 
+## AI Backend & Secrets
+
+`vite.config.ts` supervises a headless `opencode serve` and proxies it at
+`/api/ai`. The backend listens on `127.0.0.1:4096` only, and the proxy injects
+Basic auth — the password never reaches the browser.
+
+No password is stored in this repository. It is generated once per user:
+
+| OS | Location |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Sipher\opencode-password` (DPAPI-encrypted) |
+| Linux/macOS | `~/.config/sipher/opencode-password` (mode 0600) |
+
+Overrides: `SIPHER_AI_PASSWORD`, `SIPHER_AI_PASSWORD_FILE`, `SIPHER_AI_PORT`,
+`SIPHER_OPENCODE_BIN`. Delete the secret file to rotate it — the next start
+generates a new one.
+
 ## Adding a New Panel
 
 1. Create component in `src/components/mc/`

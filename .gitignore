@@ -19,6 +19,9 @@ hardware/**/*.step
 hardware/**/*.stl
 hardware/**/*.gcode
 
+# Local secrets (AI backend password, etc.)
+.secrets/
+
 # Tooling
 .idea/
 .vscode/

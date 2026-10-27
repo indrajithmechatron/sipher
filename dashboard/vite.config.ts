@@ -7,6 +7,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import http from "node:http";
+import { resolveAiPassword, secretFilePath } from "./ai-secret.mjs";
 
 // Where /api and /command are proxied. Defaults to the robot; override with
 // SIPHER_API (e.g. a local mock) when the Pi is offline.
@@ -30,10 +31,21 @@ const MAX_SESSIONS = 4;
 // restarts it if it ever dies. The dashboard talks to it through the
 // /api/ai proxy (Basic auth injected here, never in the browser).
 const AI_PORT = Number(process.env.SIPHER_AI_PORT ?? 4096);
-const AI_PASSWORD = process.env.SIPHER_AI_PASSWORD ?? "***REMOVED***";
+// Loopback only: the Vite proxy is the only client, and the AI backend can run
+// shell commands — it must never be reachable from the network.
+const AI_HOST = "127.0.0.1";
 const AI_REPO_ROOT = path.resolve(__dirname, "..");
 
-const AI_AUTH = "Basic " + Buffer.from(`opencode:${AI_PASSWORD}`).toString("base64");
+// Resolved lazily so `vite build` never creates or reads a secret file.
+let aiPasswordCache: string | null = null;
+function aiPassword(): string {
+  aiPasswordCache ??= resolveAiPassword();
+  return aiPasswordCache;
+}
+
+function aiAuth(): string {
+  return "Basic " + Buffer.from(`opencode:${aiPassword()}`).toString("base64");
+}
 
 function resolveOpencodeBin(): string {
   const custom = process.env.SIPHER_OPENCODE_BIN;
@@ -50,12 +62,21 @@ function resolveOpencodeBin(): string {
   return "opencode";
 }
 
+let authWarned = false;
+
 function aiAlive(): Promise<boolean> {
   return new Promise((resolve) => {
     const req = http.get(
-      { host: "127.0.0.1", port: AI_PORT, path: "/global/health", headers: { Authorization: AI_AUTH }, timeout: 2000 },
+      { host: "127.0.0.1", port: AI_PORT, path: "/global/health", headers: { Authorization: aiAuth() }, timeout: 2000 },
       (res) => {
         res.resume();
+        if (res.statusCode === 401 && !authWarned) {
+          authWarned = true;
+          console.warn(
+            `[sipher] port ${AI_PORT} is already serving opencode with a different password — ` +
+              "stop that process so the dashboard can start its own",
+          );
+        }
         resolve(res.statusCode === 200);
       },
     );
@@ -70,6 +91,7 @@ function aiAlive(): Promise<boolean> {
 function opencodeSupervisor(): Plugin {
   let child: ChildProcess | null = null;
   let launching = false;
+  let loggedSecret = false;
   const bin = resolveOpencodeBin();
 
   const ensure = async (): Promise<boolean> => {
@@ -82,9 +104,17 @@ function opencodeSupervisor(): Plugin {
       } catch {}
       child = null;
     }
-    child = spawn(bin, ["serve", "--port", String(AI_PORT), "--hostname", "0.0.0.0"], {
+    if (!loggedSecret) {
+      loggedSecret = true;
+      console.log(
+        process.env.SIPHER_AI_PASSWORD
+          ? "[sipher] AI backend password: SIPHER_AI_PASSWORD"
+          : `[sipher] AI backend password: ${secretFilePath()}`,
+      );
+    }
+    child = spawn(bin, ["serve", "--port", String(AI_PORT), "--hostname", AI_HOST], {
       cwd: AI_REPO_ROOT,
-      env: { ...process.env, OPENCODE_SERVER_PASSWORD: AI_PASSWORD },
+      env: { ...process.env, OPENCODE_SERVER_PASSWORD: aiPassword() },
       windowsHide: true,
       shell: !bin.endsWith(".exe") && !bin.includes("node_modules"),
     });
@@ -420,7 +450,7 @@ export default defineConfig({
         ws: false,
         configure: (proxy) => {
           proxy.on("proxyReq", (proxyReq) => {
-            proxyReq.setHeader("Authorization", AI_AUTH);
+            proxyReq.setHeader("Authorization", aiAuth());
           });
           proxy.on("error", (_e, _req, res) => {
             if (res && !res.headersSent) {
@@ -445,7 +475,7 @@ export default defineConfig({
         ws: false,
         configure: (proxy) => {
           proxy.on("proxyReq", (proxyReq) => {
-            proxyReq.setHeader("Authorization", AI_AUTH);
+            proxyReq.setHeader("Authorization", aiAuth());
           });
         },
       },
