@@ -12,6 +12,7 @@ Architecture:
   Dashboard (browser) -> command_endpoint.py (:8888) -> bridge.py (:5000) -> Pico (USB serial)
 """
 
+import base64
 import hmac
 import http.server
 import ipaddress
@@ -30,6 +31,15 @@ import urllib.request
 # Config
 # ---------------------------------------------------------------------------
 PORT = int(os.environ.get("SIPHER_PORT", "8888"))
+AI_BASE = os.environ.get("SIPHER_AI_BASE", "http://100.88.50.31:4096").rstrip("/")
+ASR_BASE = os.environ.get("SIPHER_ASR_BASE", "http://100.88.50.31:3000").rstrip("/")
+AI_PASSWORD = os.environ.get("SIPHER_AI_PASSWORD", "")
+if not AI_PASSWORD:
+    try:
+        AI_PASSWORD = (pathlib.Path(REPO_DIR) / ".ai_password").read_text(encoding="utf-8").strip()
+    except Exception:
+        AI_PASSWORD = ""
+AI_AUTH = "Basic " + base64.b64encode(("opencode:" + AI_PASSWORD).encode("utf-8")).decode("ascii")
 PICO_SERIAL = os.environ.get("SIPHER_PICO_SERIAL", "/dev/ttyACM0")
 PICO_BAUD = int(os.environ.get("SIPHER_PICO_BAUD", "115200"))
 REPO_DIR = os.environ.get("SIPHER_REPO_DIR", "/home/sipher/sipher")
@@ -451,7 +461,7 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Sipher-Token")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Sipher-Token, Authorization")
         self.end_headers()
         self.wfile.write(body)
 
@@ -494,11 +504,65 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Sipher-Token")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Sipher-Token, Authorization")
         self.end_headers()
 
+    def _read_body(self):
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        if n <= 0:
+            return b""
+        n = min(n, 30 * 1024 * 1024)
+        return self.rfile.read(n)
+
+    def _ai_proxy(self, base: str):
+        """Forward /api/ai/* to the PC's opencode (or ASR) backend."""
+        if self.path == "/api/ai/start":
+            try:
+                req = urllib.request.Request(base.replace("/api/ai", "") + "/global/health",
+                                            headers={"Authorization": AI_AUTH})
+                with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=10) as r:
+                    self.send_json({"ok": r.status == 200})
+                    return
+            except Exception:
+                self.send_json({"ok": False}, 502)
+                return
+        body = self._read_body()
+        ctype = self.headers.get("Content-Type", "application/json")
+        target = base + self.path
+        req = urllib.request.Request(target, data=body if body else None, method=self.command)
+        req.add_header("Authorization", AI_AUTH)
+        req.add_header("Content-Type", ctype)
+        if body:
+            req.add_header("Content-Length", str(len(body)))
+        try:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=600) as resp:
+                data = resp.read()
+                self.send_response(resp.status)
+                self.send_header("Content-Type", resp.headers.get("Content-Type", "application/json"))
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Sipher-Token, Authorization")
+                self.end_headers()
+                self.wfile.write(data)
+        except urllib.error.HTTPError as e:
+            data = e.read()
+            self.send_response(e.code)
+            self.send_header("Content-Type", e.headers.get("Content-Type", "application/json"))
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            self.send_json({"error": "ai upstream %s failed: %s" % (base, e)}, 502)
+
     def do_GET(self):
-        if self.path in ("/", "/dashboard"):
+        if self.path == "/api/ai" or self.path.startswith("/api/ai/"):
+            self._ai_proxy(AI_BASE)
+        elif self.path in ("/", "/dashboard"):
             if _dashboard_html:
                 self.send_html(_dashboard_html)
             else:
@@ -538,6 +602,10 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
             self.handle_command()
         elif self.path == "/api/bridge_cmd":
             self.handle_bridge_cmd()
+        elif self.path == "/api/ai/transcribe":
+            self._ai_proxy(ASR_BASE)
+        elif self.path == "/api/ai" or self.path.startswith("/api/ai/"):
+            self._ai_proxy(AI_BASE)
         elif self.path.startswith("/api/rag"):
             self.handle_rag("POST")
         else:
