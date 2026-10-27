@@ -829,9 +829,15 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
     def handle_bridge_cmd(self):
         """Forward a command to the bridge via TCP port 5000."""
         sess = _session_from_request(self)
-        if not sess or sess["role"] != "admin":
-            self.send_json({"error": "admin required"}, 403)
-            return
+        if sess is not None:
+            if sess["role"] != "admin":
+                self.send_json({"error": "admin required"}, 403)
+                return
+        else:
+            allowed, _ = command_authorized(self.client_address[0], self.headers.get("X-Sipher-Token", ""))
+            if not allowed:
+                self.send_json({"error": "admin required"}, 403)
+                return
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length == 0:
             self.send_json({"error": "empty body"}, 400)
@@ -1004,7 +1010,11 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         # while the client is still writing.
         body = self.rfile.read(min(content_length, 65536)) if content_length > 0 else b""
         sess = _session_from_request(self)
-        if sess is not None and sess["role"] == "admin":
+        if sess is not None:
+            # A logged-in session must be an admin; no private-client fallback.
+            if sess["role"] != "admin":
+                self.send_json({"error": "forbidden: admin role required", "rc": -1}, 403)
+                return
             allowed, why = True, ""
         else:
             allowed, why = command_authorized(
