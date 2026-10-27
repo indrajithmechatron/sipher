@@ -36,7 +36,6 @@ sipher/
 ├── docs/                    # Architecture, setup, hardware, and reports
 │   ├── hardware/            # Wiring diagram + circuit reference
 │   └── reports/             # Inspection + daily development reports
-├── marcia/                  # Partner handoff guide
 ├── README.md
 ├── .gitignore
 └── .gitleaks.toml
@@ -68,9 +67,9 @@ npm run build
 powershell -ExecutionPolicy Bypass -File .\Install-DesktopShortcut.ps1
 ```
 
-> **Marcia / partners:** after cloning, run the install script above once
-> to put **Sipher Dashboard** on your Desktop too. Full steps are in
-> `dashboard/APPLICATION.md` and `marcia/README.md` (section 0).
+> **New machine / partner setup:** after cloning, run the install script above
+> once to put **Sipher Dashboard** on your Desktop. Full steps are in
+> `dashboard/APPLICATION.md`.
 
 ## Architecture
 
@@ -86,5 +85,4 @@ See `docs/ARCHITECTURE.md` for the full 6-layer architecture definition.
 | Deploy | `deploy/README.md` | Auto-deploy setup + systemd units |
 | Dashboard | `dashboard/README.md` | Dashboard development guide |
 | Desktop App | `dashboard/APPLICATION.md` | Install Sipher Dashboard on your PC |
-| Marcia Guide | `marcia/README.md` | Partner responsibilities and setup |
 | Reports | `docs/reports/` | Inspection report + daily development notes |
