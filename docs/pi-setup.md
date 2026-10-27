@@ -19,6 +19,26 @@ Hostname `sipher` (`192.168.1.35/24` **static**), Ubuntu 24.04.4 LTS `noble` on 
 - Tool `~/.local/bin/mpremote 1.29.0` via `pip3 --break-system-packages`
 - Use: `/home/sipher/.local/bin/mpremote a0 exec "import sys; print(sys.version)"`
 
+## SSH access - key-only (planned)
+
+Admin access uses an ed25519 key, installed from the Windows workstation:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\ssh-key-setup.ps1
+powershell -ExecutionPolicy Bypass -File deploy\ssh-key-setup.ps1 -DisablePasswordAuth
+```
+
+- Key: `~/.ssh/id_ed25519_sipher` on the workstation; public half appended to
+  `/home/sipher/.ssh/authorized_keys` on the Pi.
+- `-DisablePasswordAuth` drops `/etc/ssh/sshd_config.d/99-sipher-keyonly.conf`
+  so sshd refuses passwords. The OS login password still works on the physical
+  console, which keeps recovery possible without a network path.
+- The login password is deliberately **not** recorded in this repository.
+- Address note: this page says static `192.168.1.35`, while the dashboard's
+  `SIPHER_API` and the workstation `~/.ssh/config` have used `192.168.1.37`.
+  The setup script probes `sipher.local`, `.35` and `.37` and pins whichever
+  one answers, so either can be correct after a DHCP change.
+
 ## Next
 - Wire Dejavu/Shazam + Piper/Groq voice loop to `hw:3,0` for Shazam/Muse voice.
 - Pico `main.py` for quadruped servos via `sipher` UART/I2C.

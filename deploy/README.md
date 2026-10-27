@@ -8,6 +8,7 @@ Repo location on the Pi: `/home/sipher/sipher`.
 | Path | Purpose |
 |---|---|
 | `update.sh` | Fetch + pull `main`, restart active services |
+| `ssh-key-setup.ps1` | Install the workstation's ed25519 key on the Pi (key-only SSH) |
 | `pi-firewall.sh` | Idempotent UFW baseline (SSH from LAN, dashboard port 8888) |
 | `systemd/` | Units installed on the Pi |
 | `sudoers.d/sipher-deploy` | Passwordless restart for exactly the Sipher services |
@@ -46,10 +47,33 @@ sudo systemctl enable --now sipher-deploy.timer
 After `git push` from your laptop, trigger the Pi instantly:
 
 ```powershell
-ssh -i C:\Users\indra\.ssh\id_rsa sipher@192.168.1.35 "/home/sipher/deploy/update.sh"
+ssh sipher "/home/sipher/deploy/update.sh"
 ```
 
 Add to your PowerShell profile as `git-push-and-deploy`.
+
+The `sipher` alias comes from `ssh-key-setup.ps1` (see below).
+
+## SSH keys (key-only admin access)
+
+```powershell
+# once, while the Pi is on the network (prompts for the login password once)
+powershell -ExecutionPolicy Bypass -File deploy\ssh-key-setup.ps1
+
+# then, to stop accepting passwords over SSH
+powershell -ExecutionPolicy Bypass -File deploy\ssh-key-setup.ps1 -DisablePasswordAuth
+```
+
+The script generates `~/.ssh/id_ed25519_sipher`, appends it to
+`~/.ssh/authorized_keys` on the Pi, verifies a prompt-free login, and pins a
+`Host sipher` entry in `~/.ssh/config`. It probes `sipher.local`, then
+`192.168.1.35`, then `192.168.1.37`, so it works whichever address the Pi
+answers on.
+
+`-DisablePasswordAuth` writes `/etc/ssh/sshd_config.d/99-sipher-keyonly.conf`
+and reloads sshd. The OS login password is **not** disabled by this: it stays
+valid on the physical console for recovery. Keep a working key (or a keyboard
+and monitor) before running it.
 
 ## Log
 
