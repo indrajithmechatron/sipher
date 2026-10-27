@@ -475,6 +475,7 @@ def command_authorized(addr: str, token: str) -> tuple:
 # Auth / profiles
 # ---------------------------------------------------------------------------
 _DEFAULT_SEED = "Sipher2026!"
+_SEEDED_OWNER = ["owner"]
 _SEEDED_ADMINS = ["admin", "admin2", "admin3"]
 _SEEDED_USERS = ["user1", "user2", "user3", "user4", "user5"]
 
@@ -520,15 +521,23 @@ def _save_profiles(profiles: dict) -> None:
 
 def _seed_profiles() -> dict:
     profiles = _load_profiles()
-    if profiles:
-        return profiles
-    profiles = {}
+    changed = False
+    if "owner" not in profiles:
+        profiles["owner"] = {"role": "owner", "password": _hash_password(_DEFAULT_SEED), "must_change": True}
+        changed = True
     for name in _SEEDED_ADMINS:
-        profiles[name] = {"role": "admin", "password": _hash_password(_DEFAULT_SEED), "must_change": True}
+        if name not in profiles:
+            profiles[name] = {"role": "admin", "password": _hash_password(_DEFAULT_SEED), "must_change": True}
+            changed = True
     for name in _SEEDED_USERS:
-        profiles[name] = {"role": "user", "password": _hash_password(_DEFAULT_SEED), "must_change": True}
-    _save_profiles(profiles)
-    print("[auth] seeded %d profiles (default password: %s) - change on first login" % (len(profiles), _DEFAULT_SEED), flush=True)
+        if name not in profiles:
+            profiles[name] = {"role": "user", "password": _hash_password(_DEFAULT_SEED), "must_change": True}
+            changed = True
+    if changed:
+        _save_profiles(profiles)
+        print("[auth] profiles updated (default password: %s) - change on first login" % _DEFAULT_SEED, flush=True)
+    if not profiles:
+        print("[auth] no profiles", flush=True)
     return profiles
 
 
@@ -580,13 +589,16 @@ def _session_from_request(self):
     return {"username": data["u"], "role": data["r"]}
 
 
+_ROLE_RANK = {"user": 0, "admin": 1, "owner": 2}
+
+
 def _require_auth(self, role: str = None):
     sess = _session_from_request(self)
     if not sess:
         self.send_json({"error": "unauthorized"}, 401)
         return None
-    if role == "admin" and sess["role"] != "admin":
-        self.send_json({"error": "admin required"}, 403)
+    if role and _ROLE_RANK.get(sess["role"], 0) < _ROLE_RANK.get(role, 0):
+        self.send_json({"error": "%s required" % role}, 403)
         return None
     return sess
 
@@ -830,7 +842,7 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         """Forward a command to the bridge via TCP port 5000."""
         sess = _session_from_request(self)
         if sess is not None:
-            if sess["role"] != "admin":
+            if _ROLE_RANK.get(sess["role"], 0) < 1:
                 self.send_json({"error": "admin required"}, 403)
                 return
         else:
@@ -967,8 +979,15 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         if not username or not username.replace("_", "").replace("-", "").isalnum():
             self.send_json({"error": "invalid username"}, 400)
             return
-        if role not in ("admin", "user"):
-            self.send_json({"error": "role must be admin or user"}, 400)
+        if role not in ("owner", "admin", "user"):
+            self.send_json({"error": "role must be owner, admin or user"}, 400)
+            return
+        # admins may only create users; owners may create anything
+        if sess["role"] != "owner" and _ROLE_RANK.get(role, 0) >= _ROLE_RANK.get(sess["role"], 0):
+            self.send_json({"error": "cannot create a role >= your own"}, 403)
+            return
+        if role == "owner":
+            self.send_json({"error": "owner accounts cannot be created via API"}, 403)
             return
         profiles = _load_profiles()
         if username in profiles:
@@ -995,6 +1014,10 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         profiles = _load_profiles()
         if username not in profiles:
             self.send_json({"error": "not found"}, 404)
+            return
+        target_role = profiles[username].get("role", "user")
+        if _ROLE_RANK.get(target_role, 0) >= _ROLE_RANK.get(sess["role"], 0):
+            self.send_json({"error": "cannot delete a role >= your own"}, 403)
             return
         del profiles[username]
         _save_profiles(profiles)
