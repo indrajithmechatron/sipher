@@ -42,7 +42,7 @@ flowchart LR
 
 ### Layer 1 — AI / Voice / Dashboard (`software/voice/`)
 
-**Owned by:** `always_on.py` (and future dashboard modules)
+**Owned by:** `always_on.py` (and future dashboard modules), `software/rag/` (retrieval)
 
 **Responsible for:**
 - Audio capture from USB mic (`plughw:CARD=Device,DEV:0`)
@@ -50,6 +50,8 @@ flowchart LR
 - Text-to-speech (espeak)
 - Intent extraction from transcribed text
 - Emitting **structured action requests** (e.g. `REQUEST_MOTION(rotate)`, `REQUEST_STOP`, `REQUEST_SHUTDOWN`)
+- Retrieval augmentation: BM25 search over repo docs, reports, telemetry logs
+  and ingested manuals (`software/rag/`, served at `/api/rag/*`)
 
 **Hard rules:**
 - ❌ Must NOT directly write servo PWM values

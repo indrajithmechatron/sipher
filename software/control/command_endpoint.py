@@ -36,6 +36,12 @@ BRIDGE_CMD_URL = os.environ.get("SIPHER_BRIDGE_CMD_URL", "http://localhost:5001/
 _THIS_DIR = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
 DASHBOARD_PATH = _THIS_DIR.parent / "dashboard" / "index.html"
 
+# Make sibling packages (control, robot, rag, ...) importable when this file is
+# run directly instead of with PYTHONPATH=/home/sipher/sipher/software.
+_SOFTWARE_DIR = str(_THIS_DIR.parent)
+if _SOFTWARE_DIR not in sys.path:
+    sys.path.insert(0, _SOFTWARE_DIR)
+
 # ---------------------------------------------------------------------------
 # Sensor data — polled from bridge HTTP endpoint (port 5001)
 # ---------------------------------------------------------------------------
@@ -316,6 +322,8 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(get_latest_sensor())
         elif self.path == "/api/pi":
             self.send_json(get_pi_stats())
+        elif self.path.startswith("/api/rag"):
+            self.handle_rag("GET")
         elif self.path.startswith("/api/map"):
             self.handle_map()
         elif self.path == "/api/info":
@@ -345,8 +353,38 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
             self.handle_command()
         elif self.path == "/api/bridge_cmd":
             self.handle_bridge_cmd()
+        elif self.path.startswith("/api/rag"):
+            self.handle_rag("POST")
         else:
             self.send_json({"error": "not found"}, 404)
+
+    def handle_rag(self, method):
+        """Serve the retrieval layer (Layer 1) at /api/rag/*.
+
+        Indexing is lazy: the first request loads .rag/index.json or builds it.
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length > 8_000_000:
+            self.send_json({"error": "body too large"}, 413)
+            return
+        body = self.rfile.read(length) if length > 0 else b""
+        try:
+            from rag.http_api import dispatch
+            from rag.service import get_knowledge_base
+        except Exception as e:
+            self.send_json({"error": f"RAG unavailable: {e}"}, 503)
+            return
+        status, payload = dispatch(
+            get_knowledge_base(),
+            method,
+            self.path,
+            body,
+            self.headers.get("Content-Type", ""),
+        )
+        self.send_json(payload, status)
 
     def handle_map(self):
         """Proxy occupancy-map requests to the bridge (Layer 2 owns the mapper).

@@ -22,6 +22,7 @@ A four-legged (quadruped) spider-style robot built with Raspberry Pi 4 + Pico 2 
 sipher/
 ├── software/                # Robot software, one folder per architecture layer
 │   ├── voice/               # Layer 1 — always-on voice control
+│   ├── rag/                 # Layer 1 — BM25 retrieval (/api/rag)
 │   ├── robot/               # Layer 2 — serial bridge + instincts
 │   ├── ros2/                # Layer 3 — ROS 2 middleware (planned)
 │   ├── control/             # Layer 4 — command endpoint, gait/IK (planned)
@@ -83,6 +84,7 @@ See `docs/ARCHITECTURE.md` for the full 6-layer architecture definition.
 | Pi Setup | `docs/pi-setup.md` | Raspberry Pi 4 configuration |
 | Wiring | `docs/hardware/pico-wiring.md` | Pico 2 W pin mapping and wiring |
 | Deploy | `deploy/README.md` | Auto-deploy setup + systemd units |
+| RAG | `software/rag/README.md` | Retrieval API, corpus, CLI |
 | Dashboard | `dashboard/README.md` | Dashboard development guide |
 | Desktop App | `dashboard/APPLICATION.md` | Install Sipher Dashboard on your PC |
 | Reports | `docs/reports/` | Inspection report + daily development notes |

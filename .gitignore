@@ -22,6 +22,9 @@ hardware/**/*.gcode
 # Local secrets (AI backend password, etc.)
 .secrets/
 
+# Retrieval index (rebuilt on demand)
+.rag/
+
 # Tooling
 .idea/
 .vscode/

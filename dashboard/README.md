@@ -68,4 +68,6 @@ generates a new one.
 |---|---|---|
 | `/api/sensors` | GET | Latest sensor snapshot from Pico |
 | `/api/bridge_cmd` | POST | Forward command to Pico |
+| `/api/rag/search` | GET | BM25 search over docs, reports and manuals |
+| `/api/rag/context` | GET | Cited excerpts as an LLM prompt block |
 | `/command` | POST | Run restricted shell command |

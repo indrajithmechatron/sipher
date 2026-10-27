@@ -4,7 +4,7 @@
 
 ## Key Files
 
-- `command_endpoint.py` — HTTP server on port 5001: serves dashboard, `/api/sensors`, `/api/bridge_cmd`, `/command`
+- `command_endpoint.py` — HTTP server on port 8888: serves dashboard, `/api/sensors`, `/api/bridge_cmd`, `/command`, `/api/rag/*`
 - `joint_limits.py` — (planned) min/max angles per servo
 - `inverse_kinematics.py` — (planned) foot trajectory from body velocity
 - `gait_generator.py` — (planned) tripod, wave, trot patterns
