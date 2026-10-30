@@ -24,7 +24,10 @@ hardware/**/*.gcode
 
 # Local secrets (AI backend password, etc.)
 .secrets/
-.ai_password
+# Written in-place by command_endpoint.py at the repo root on the Pi
+/.ai_password
+/.session_secret
+/profiles.json
 
 # Retrieval index (rebuilt on demand)
 .rag/
