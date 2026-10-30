@@ -53,16 +53,16 @@ reaches it through the existing `/api` proxy — no dashboard changes required.
 
 ```bash
 # from a laptop, through the Pi
-curl "http://192.168.1.35:8888/api/rag/search?q=watchdog%20timeout&k=3"
-curl "http://192.168.1.35:8888/api/rag/context?q=how%20does%20deploy%20restart&k=3"
+curl "http://192.168.1.37:8888/api/rag/search?q=watchdog%20timeout&k=3"
+curl "http://192.168.1.37:8888/api/rag/context?q=how%20does%20deploy%20restart&k=3"
 
 # add a datasheet whose text was already extracted (e.g. by the dashboard)
-curl -X POST "http://192.168.1.35:8888/api/rag/ingest" \
+curl -X POST "http://192.168.1.37:8888/api/rag/ingest" \
      -H "Content-Type: application/json" \
      -d '{"name":"hip-servo.pdf","text":"Stall torque 15 kg-cm at 6 V ..."}'
 
 # or send a PDF and let the Pi extract it
-curl -X POST "http://192.168.1.35:8888/api/rag/ingest?name=manual.pdf" \
+curl -X POST "http://192.168.1.37:8888/api/rag/ingest?name=manual.pdf" \
      -H "Content-Type: application/pdf" --data-binary @manual.pdf
 ```
 

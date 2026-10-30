@@ -1,12 +1,19 @@
 # sipher — Raspberry Pi 4 (Quadruped Brain)
 
-Hostname `sipher` (`192.168.1.35/24` **static**), Ubuntu 24.04.4 LTS `noble` on Pi 4, user `sipher`.
+Hostname `sipher` (`192.168.1.37/24` **static**), Ubuntu 24.04.4 LTS `noble` on Pi 4, user `sipher`.
 
-## Network — static (done 2026-09-04)
-- `MAC 2c:cf:67:8d:0f:57` → `wlan0 192.168.1.35/24` `via 192.168.1.1`
-- `mDNS sipher.local` also works
-- Netplan `50-cloud-init.yaml` `dhcp4: false` + `addresses [192.168.1.35/24]` + `gateway4 192.168.1.1` + `nameservers [192.168.1.1,8.8.8.8,1.1.1.1]` → `proto static`
-- `sipher.local` → `192.168.1.35` (A) + `fe80::2ecf:67ff:fe8d:f57` (AAAA)
+## Network — static (verified 2026-10-30)
+
+- `MAC 2c:cf:67:8d:0f:57` → `wlan0 192.168.1.37/24`, default route via `192.168.1.1`
+- Netplan `/etc/netplan/50-cloud-init.yaml`: `wlan0` `dhcp4: false` +
+  `addresses [192.168.1.37/24]` + route `to: default via 192.168.1.1` +
+  `nameservers [192.168.1.1, 8.8.8.8, 1.1.1.1]` → `proto static`
+- `eth0` is link-local only (`169.254.191.88/16`)
+- `192.168.1.35` — the address this page used to document — no longer answers;
+  the Pi has been on `.37` since the Wi-Fi/netplan change, and both the dashboard
+  (`SIPHER_API`) and `deploy/systemd/sipher-command-endpoint.service` (`PI_IP`) use it.
+- `sipher.local` currently resolves over mDNS to the IPv6 link-local address only
+  (`fe80::2ecf:67ff:fe8d:f57`), so prefer the IPv4 address in scripts.
 
 ## Audio — USB mic (ready)
 - `08bb:2902 Texas Instruments PCM2902` / `C-Media USB PnP` → `card 3 [Device]` `pcmC3D0c` `controlC3`
@@ -19,7 +26,7 @@ Hostname `sipher` (`192.168.1.35/24` **static**), Ubuntu 24.04.4 LTS `noble` on 
 - Tool `~/.local/bin/mpremote 1.29.0` via `pip3 --break-system-packages`
 - Use: `/home/sipher/.local/bin/mpremote a0 exec "import sys; print(sys.version)"`
 
-## SSH access - key-only (planned)
+## SSH access — key-only (done 2026-10-30)
 
 Admin access uses an ed25519 key, installed from the Windows workstation:
 
@@ -30,17 +37,23 @@ powershell -ExecutionPolicy Bypass -File deploy\ssh-key-setup.ps1 -DisablePasswo
 
 - Key: `~/.ssh/id_ed25519_sipher` on the workstation; public half appended to
   `/home/sipher/.ssh/authorized_keys` on the Pi.
-- `-DisablePasswordAuth` drops `/etc/ssh/sshd_config.d/99-sipher-keyonly.conf`
-  so sshd refuses passwords. The OS login password still works on the physical
-  console, which keeps recovery possible without a network path.
+- The script pins `Host sipher` in `~/.ssh/config` (currently `192.168.1.37`,
+  `IdentitiesOnly yes`), so `ssh sipher` uses this key and nothing else.
+- Re-running is safe: the install step is skipped when the key already logs in,
+  and it falls back to an existing working key when password login is already
+  refused. `-DisablePasswordAuth` writes
+  `/etc/ssh/sshd_config.d/99-sipher-keyonly.conf` only when it can read the
+  effective sshd config (otherwise it prints what to check).
+- On this Pi password auth is already off via
+  `/etc/ssh/sshd_config.d/00-sipher.conf` (`PasswordAuthentication no`,
+  `KbdInteractiveAuthentication no`), so a password login is refused even
+  though the OS password still works on the physical console.
 - The login password is deliberately **not** recorded in this repository.
-- Address note: this page says static `192.168.1.35`, while the dashboard's
-  `SIPHER_API` and the workstation `~/.ssh/config` have used `192.168.1.37`.
-  The setup script probes `sipher.local`, `.35` and `.37` and pins whichever
-  one answers, so either can be correct after a DHCP change.
+- Firewall: `deploy/pi-firewall.sh` allows `22/tcp` from the LAN only and
+  `8888/tcp` from the LAN + tailnet.
 
 ## Next
 - Wire Dejavu/Shazam + Piper/Groq voice loop to `hw:3,0` for Shazam/Muse voice.
 - Pico `main.py` for quadruped servos via `sipher` UART/I2C.
 
-Last verified: 2026-09-04 `ssh sipher@sipher.local`
+Last verified: 2026-10-30 — `ssh sipher` key-only, dashboard `:8888`, RAG `/api/rag/*`

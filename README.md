@@ -91,8 +91,11 @@ Full API, corpus rules, CLI and configuration: `software/rag/README.md`.
   Windows, `~/.config/sipher/` elsewhere), DPAPI-encrypted or `0600`.
 - **AI backend is loopback-only** (`127.0.0.1:4096`); the Vite proxy injects
   Basic auth, so the password never reaches the browser.
-- **Key-only SSH** to the Pi: run `deploy/ssh-key-setup.ps1`, then re-run with
-  `-DisablePasswordAuth`. The OS password stays valid on the physical console.
+- **Key-only SSH** to the Pi: `Host sipher` uses `~/.ssh/id_ed25519_sipher`
+  (`IdentitiesOnly yes`); sshd already refuses passwords
+  (`/etc/ssh/sshd_config.d/00-sipher.conf`). The OS password stays valid on the
+  physical console. `deploy/ssh-key-setup.ps1` installs the key on a new machine
+  and is safe to re-run.
 - **`/command` is not a shell.** Requests are parsed with `shlex` and matched to
   an argv table (`systemctl` on `sipher-*` units, read-only `git`, `cat` inside
   the repo/log dir, `tailscale`), executed with `shell=False`. Set

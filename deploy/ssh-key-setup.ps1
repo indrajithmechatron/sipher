@@ -7,11 +7,13 @@
 #   powershell -ExecutionPolicy Bypass -File deploy\ssh-key-setup.ps1
 #   powershell -ExecutionPolicy Bypass -File deploy\ssh-key-setup.ps1 -DisablePasswordAuth
 #
-# The password is never stored or passed on the command line: the first ssh
-# connection prompts for it once, exactly like a manual login.
+# Re-running is safe: the key install is skipped when it already works, and an
+# existing working key is used when password login is already refused.
+# The password is never stored or passed on the command line: when it is needed,
+# the first ssh connection prompts for it once, exactly like a manual login.
 
 param(
-    [string[]]$Hosts = @("sipher.local", "192.168.1.35", "192.168.1.37"),
+    [string[]]$Hosts = @("192.168.1.37", "sipher.local"),
     [string]$User = "sipher",
     [string]$KeyPath = "$env:USERPROFILE\.ssh\id_ed25519_sipher",
     [string]$ConfigHost = "sipher",
@@ -67,22 +69,53 @@ Say "target: $User@$target"
 
 # --- 3. install the public key (skipped when this key already works) --------
 function Test-KeyLogin {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     $probe = & ssh -o BatchMode=yes -o IdentitiesOnly=yes -o PasswordAuthentication=no -i $KeyPath -o StrictHostKeyChecking=accept-new "$User@$target" "echo key-ok" 2>&1
-    return ($LASTEXITCODE -eq 0 -and ($probe -join '') -match "key-ok")
+    $ok = ($LASTEXITCODE -eq 0 -and ($probe -join '') -match "key-ok")
+    $ErrorActionPreference = $prev
+    return $ok
 }
 
 $remote = "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && sort -u -o ~/.ssh/authorized_keys ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+
+function Install-PubKey([string]$Mode) {
+    # Returns $true when ssh accepted the login and ran the install command.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    if ($Mode -eq "password") {
+        $out = Get-Content $pubKey -Raw | & ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 -o StrictHostKeyChecking=accept-new "$User@$target" $remote 2>&1
+    } else {
+        $out = Get-Content $pubKey -Raw | & ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$User@$target" $remote 2>&1
+    }
+    $ok = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prev
+    if (-not $ok -and $script:installErrors) { $script:installErrors += ($out -join "`n") }
+    return $ok
+}
+$script:installErrors = ""
+
 if (Test-KeyLogin) {
     Say "key already installed - skipping the password prompt"
 } else {
     Say "installing key - enter the Pi password when prompted"
-    Get-Content $pubKey | & ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new "$User@$target" $remote
-    if ($LASTEXITCODE -ne 0) { throw "key install failed (exit $LASTEXITCODE)" }
+    if (Install-PubKey "password") {
+        Say "key installed with the login password"
+    } elseif (Install-PubKey "existing-key") {
+        Say "key installed with an already-working local key (password login refused)"
+    } else {
+        Write-Host $script:installErrors
+        throw "could not install the key: password login refused and no existing key works"
+    }
 }
+
 
 # --- 4. verify prompt-free login -------------------------------------------
 Say "verifying key login"
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 $check = & ssh -o BatchMode=yes -o IdentitiesOnly=yes -o PasswordAuthentication=no -i $KeyPath -o StrictHostKeyChecking=accept-new "$User@$target" "echo key-ok" 2>&1
+$ErrorActionPreference = $prevEap
 if ($LASTEXITCODE -ne 0 -or ($check -join '') -notmatch "key-ok") {
     throw "key login failed: $($check -join ' ')"
 }
@@ -107,23 +140,40 @@ if (-not $NoConfig) {
 }
 
 # --- 6. optional hardening --------------------------------------------------
+function Invoke-Remote([string]$Script) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $result = & ssh -o BatchMode=yes -o IdentitiesOnly=yes -i $KeyPath "$User@$target" $Script 2>&1
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    return @{ Output = ($result -join "`n"); Code = $code }
+}
+
 if ($DisablePasswordAuth) {
-    Say "disabling SSH password auth (console password is unaffected)"
-    $effective = & ssh -o BatchMode=yes -o IdentitiesOnly=yes -i $KeyPath "$User@$target" "sudo -n sshd -T 2>/dev/null || sshd -T 2>/dev/null || true" 2>&1
-    if (($effective -join "`n") -match "(?im)^passwordauthentication\s+no") {
+    Say "checking SSH password auth (the console password is unaffected)"
+    $effective = Invoke-Remote "sudo -n sshd -T 2>/dev/null"
+    if ($effective.Code -ne 0 -or -not $effective.Output) {
+        # Without passwordless sudo the effective config cannot be read here, and
+        # writing a drop-in would need a password prompt over a non-tty session.
+        Say "cannot read the effective sshd config without passwordless sudo"
+        Say "password auth may already be off via a drop-in - check on the Pi:"
+        Say "  sudo sshd -T | grep -i passwordauthentication"
+        Say "  ls /etc/ssh/sshd_config.d/"
+        Say "or re-run this script from a terminal on the Pi with sudo available"
+    } elseif ($effective.Output -match "(?im)^passwordauthentication\s+no") {
         Say "password auth is already disabled; nothing to change"
     } else {
         $harden = @'
 set -e
 f=/etc/ssh/sshd_config.d/99-sipher-keyonly.conf
-printf '%s\n' "PasswordAuthentication no" "KbdInteractiveAuthentication no" "PubkeyAuthentication yes" | sudo tee "$f" >/dev/null
-sudo sshd -t
-sudo systemctl reload ssh
+printf '%s\n' "PasswordAuthentication no" "KbdInteractiveAuthentication no" "PubkeyAuthentication yes" | sudo -n tee "$f" >/dev/null
+sudo -n sshd -t
+sudo -n systemctl reload ssh
 echo hardened
 '@
-        $out = & ssh -o BatchMode=yes -o IdentitiesOnly=yes -i $KeyPath "$User@$target" $harden 2>&1
-        if ($LASTEXITCODE -ne 0 -or ($out -join '') -notmatch "hardened") {
-            Write-Host ($out -join "`n")
+        $out = Invoke-Remote $harden
+        if ($out.Code -ne 0 -or $out.Output -notmatch "hardened") {
+            Write-Host $out.Output
             throw "hardening failed - password auth was left enabled"
         }
         Say "password auth disabled; the login password still works on the physical console"

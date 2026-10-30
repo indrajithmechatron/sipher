@@ -52,7 +52,7 @@ sudo systemctl restart sipher-command-endpoint
 `http://192.168.1.37:8888` (the Pi). Point it elsewhere with:
 
 ```powershell
-$env:SIPHER_API = "http://192.168.1.35:8888"   # e.g. the static address
+$env:SIPHER_API = "http://192.168.1.40:8888"   # e.g. after the Pi changes address
 ```
 
 ## Architecture

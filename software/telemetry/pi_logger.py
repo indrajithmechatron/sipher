@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # pi_logger.py — sipher Pi 4 logs Pico JSON by subscribing to the bridge TCP stream
 # The bridge (robot.pico_bridge) owns /dev/ttyACM0. Never open the serial port here.
-# Run on sipher@192.168.1.35: python3 pi_logger.py
+# Run on sipher@192.168.1.37: python3 pi_logger.py
 import socket, time, pathlib, os
 
 HOST = os.environ.get("SIPHER_BRIDGE_HOST", "127.0.0.1")

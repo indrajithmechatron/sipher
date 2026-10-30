@@ -66,14 +66,24 @@ powershell -ExecutionPolicy Bypass -File deploy\ssh-key-setup.ps1 -DisablePasswo
 
 The script generates `~/.ssh/id_ed25519_sipher`, appends it to
 `~/.ssh/authorized_keys` on the Pi, verifies a prompt-free login, and pins a
-`Host sipher` entry in `~/.ssh/config`. It probes `sipher.local`, then
-`192.168.1.35`, then `192.168.1.37`, so it works whichever address the Pi
-answers on.
+`Host sipher` entry in `~/.ssh/config`. It probes `192.168.1.37`, then
+`sipher.local` (override with `-Hosts`, e.g. `-Hosts 192.168.1.35`).
 
-`-DisablePasswordAuth` writes `/etc/ssh/sshd_config.d/99-sipher-keyonly.conf`
-and reloads sshd. The OS login password is **not** disabled by this: it stays
-valid on the physical console for recovery. Keep a working key (or a keyboard
-and monitor) before running it.
+Re-running is safe:
+
+- the install step is skipped when the key already logs in, so there is no
+  second password prompt;
+- if password login is already refused, it installs the key through any
+  existing working key instead of failing;
+- `-DisablePasswordAuth` only writes
+  `/etc/ssh/sshd_config.d/99-sipher-keyonly.conf` when it can read the effective
+  sshd config (it needs passwordless sudo), and otherwise prints the two
+  commands to check by hand. On the current Pi, password auth is already off via
+  `00-sipher.conf`.
+
+The OS login password is **not** disabled by any of this: it stays valid on the
+physical console for recovery. Keep a working key (or a keyboard and monitor)
+before changing sshd.
 
 ## Log
 
@@ -87,7 +97,9 @@ and monitor) before running it.
   `origin/main` (history was scrubbed, as when credentials are purged), the
   script logs `local history diverged` and resets to `origin/main` instead of
   failing and leaving the services on old code. The Pi is a deploy target, so
-  local commits there are always discarded.
+  local commits there are always discarded — but **uncommitted work is backed
+  up first** to `~/backups/deploy-<timestamp>/` (patch, tarball and status
+  list) before the reset, so a hard reset can no longer lose it.
 - **Services** are restarted only when they are active, using the narrow
   `sudoers.d/sipher-deploy` rule — no blanket passwordless sudo.
 - **Firewall scope.** `pi-firewall.sh` opens `22/tcp` from the LAN only, and
