@@ -10,6 +10,20 @@ RESTART_SERVICES=("sipher-bridge" "sipher-command-endpoint" "sipher-logger" "sip
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" | tee -a "$LOG"; }
 
+backup_local_changes() {
+    # A hard reset would otherwise silently discard work in progress.
+    local dirty dir
+    dirty=$(git diff HEAD --name-only 2>/dev/null || true)
+    [ -n "$dirty" ] || return 0
+    dir="$HOME/backups/deploy-$(date '+%Y%m%d-%H%M%S')"
+    mkdir -p "$dir"
+    git diff HEAD > "$dir/worktree.patch" 2>/dev/null || true
+    git status --porcelain > "$dir/status.txt" 2>/dev/null || true
+    # shellcheck disable=SC2086
+    tar -czf "$dir/modified.tar.gz" $dirty 2>/dev/null || true
+    log "WARN: worktree had local changes - backed up to $dir"
+}
+
 log "--- START ---"
 
 if [ ! -d "$REPO_DIR/.git" ]; then
@@ -37,6 +51,7 @@ if git merge-base --is-ancestor "$LOCAL" "$REMOTE"; then
 else
     # Local history is not an ancestor of origin (e.g. upstream was rewritten).
     # This box is a deploy target, so follow origin rather than merging.
+    backup_local_changes
     log "local history diverged from origin/$BRANCH - resetting to $REMOTE"
     git reset --hard "$REMOTE" 2>&1 | while read -r line; do log "reset: $line"; done
 fi

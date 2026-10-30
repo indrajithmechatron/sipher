@@ -65,11 +65,20 @@ if (-not $target) {
 }
 Say "target: $User@$target"
 
-# --- 3. install the public key (prompts for the password once) --------------
+# --- 3. install the public key (skipped when this key already works) --------
+function Test-KeyLogin {
+    $probe = & ssh -o BatchMode=yes -o IdentitiesOnly=yes -o PasswordAuthentication=no -i $KeyPath -o StrictHostKeyChecking=accept-new "$User@$target" "echo key-ok" 2>&1
+    return ($LASTEXITCODE -eq 0 -and ($probe -join '') -match "key-ok")
+}
+
 $remote = "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && sort -u -o ~/.ssh/authorized_keys ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-Say "installing key - enter the Pi password when prompted"
-Get-Content $pubKey | & ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new "$User@$target" $remote
-if ($LASTEXITCODE -ne 0) { throw "key install failed (exit $LASTEXITCODE)" }
+if (Test-KeyLogin) {
+    Say "key already installed - skipping the password prompt"
+} else {
+    Say "installing key - enter the Pi password when prompted"
+    Get-Content $pubKey | & ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new "$User@$target" $remote
+    if ($LASTEXITCODE -ne 0) { throw "key install failed (exit $LASTEXITCODE)" }
+}
 
 # --- 4. verify prompt-free login -------------------------------------------
 Say "verifying key login"
@@ -100,7 +109,11 @@ if (-not $NoConfig) {
 # --- 6. optional hardening --------------------------------------------------
 if ($DisablePasswordAuth) {
     Say "disabling SSH password auth (console password is unaffected)"
-    $harden = @'
+    $effective = & ssh -o BatchMode=yes -o IdentitiesOnly=yes -i $KeyPath "$User@$target" "sudo -n sshd -T 2>/dev/null || sshd -T 2>/dev/null || true" 2>&1
+    if (($effective -join "`n") -match "(?im)^passwordauthentication\s+no") {
+        Say "password auth is already disabled; nothing to change"
+    } else {
+        $harden = @'
 set -e
 f=/etc/ssh/sshd_config.d/99-sipher-keyonly.conf
 printf '%s\n' "PasswordAuthentication no" "KbdInteractiveAuthentication no" "PubkeyAuthentication yes" | sudo tee "$f" >/dev/null
@@ -108,13 +121,14 @@ sudo sshd -t
 sudo systemctl reload ssh
 echo hardened
 '@
-    $out = & ssh -o BatchMode=yes -o IdentitiesOnly=yes -i $KeyPath "$User@$target" $harden 2>&1
-    if ($LASTEXITCODE -ne 0 -or ($out -join '') -notmatch "hardened") {
-        Write-Host ($out -join "`n")
-        throw "hardening failed - password auth was left enabled"
+        $out = & ssh -o BatchMode=yes -o IdentitiesOnly=yes -i $KeyPath "$User@$target" $harden 2>&1
+        if ($LASTEXITCODE -ne 0 -or ($out -join '') -notmatch "hardened") {
+            Write-Host ($out -join "`n")
+            throw "hardening failed - password auth was left enabled"
+        }
+        Say "password auth disabled; the login password still works on the physical console"
+        Say "verify: ssh -o PasswordAuthentication=yes -o PubkeyAuthentication=no $User@$target (expect a refusal)"
     }
-    Say "password auth disabled; the login password still works on the physical console"
-    Say "verify: ssh -o PasswordAuthentication=yes -o PubkeyAuthentication=no $User@$target (expect a refusal)"
 } else {
     Say "password auth still enabled; re-run with -DisablePasswordAuth to make SSH key-only"
 }
