@@ -14,7 +14,7 @@ try:
 except ImportError:
     uselect = None
 
-FW_VERSION = "sipher-pico-main-v5"
+FW_VERSION = "sipher-pico-main-v6"
 
 # ---------------------------------------------------------------------------
 # Hardware init — dual I2C buses
@@ -42,18 +42,24 @@ def _bus_for(addr):
 # ---------------------------------------------------------------------------
 PCA_ADDR = 0x40
 pca_bus = _bus_for(PCA_ADDR)
-try:
-    pca_bus.writeto_mem(PCA_ADDR, 0x00, b'\x10')
-    time.sleep_ms(5)
-    pca_bus.writeto_mem(PCA_ADDR, 0xFE, bytes([121]))
-    pca_bus.writeto_mem(PCA_ADDR, 0x01, b'\x04')
-    pca_bus.writeto_mem(PCA_ADDR, 0x02, b'\x00')
-    # MODE1 = RESTART | AUTO_INCREMENT. AI is required for the 64-byte
-    # register readback in pca_readback(); without it every byte returns ON_L.
-    pca_bus.writeto_mem(PCA_ADDR, 0x00, b'\xA0')
-    time.sleep_ms(5)
-except Exception:
-    pass
+
+def pca_init():
+    """50 Hz PWM, auto-increment on, outputs enabled (PCA9685 power-on state)."""
+    try:
+        pca_bus.writeto_mem(PCA_ADDR, 0x00, b'\x10')          # SLEEP
+        time.sleep_ms(5)
+        pca_bus.writeto_mem(PCA_ADDR, 0xFE, bytes([121]))      # prescale -> 50 Hz
+        pca_bus.writeto_mem(PCA_ADDR, 0x01, b'\x04')           # MODE2: totem-pole
+        pca_bus.writeto_mem(PCA_ADDR, 0x02, b'\x00')
+        # MODE1 = RESTART | AUTO_INCREMENT. AI is required for the 64-byte
+        # register readback in pca_readback(); without it every byte returns ON_L.
+        pca_bus.writeto_mem(PCA_ADDR, 0x00, b'\xA0')
+        time.sleep_ms(5)
+        return True
+    except Exception:
+        return False
+
+pca_init()
 
 def pca_set_channel(ch, pulse_us):
     try:
@@ -455,6 +461,50 @@ def read_ina():
 _ina_init()
 
 # ---------------------------------------------------------------------------
+# Bus re-resolution — the servo/sensor board can power up after the Pico
+# ---------------------------------------------------------------------------
+_BUS_CHECK_MS = 5000
+_bus_checked_ms = 0
+
+def _bus_has(bus, addr):
+    try:
+        return addr in bus.scan()
+    except Exception:
+        return False
+
+def _ensure_buses():
+    """Adopt the other I2C bus when a device shows up there later.
+
+    _bus_for() runs once at import. If the PCA9685 / INA219 / VL53L0X board is
+    still unpowered at that moment (or the Pico boots before its rail is up),
+    the lookup falls back to i2c0 and every servo write afterwards fails
+    silently: PCA registers stay at their power-on defaults, telemetry reports
+    pca.present=false, and no PWM ever reaches the servos. Re-check the cached
+    bus every few seconds and re-init the device once it answers.
+    """
+    global pca_bus, vl_bus, ina_bus, _bus_checked_ms
+    now = time.ticks_ms()
+    if _bus_checked_ms and time.ticks_diff(now, _bus_checked_ms) < _BUS_CHECK_MS:
+        return
+    _bus_checked_ms = now
+    if not _bus_has(pca_bus, PCA_ADDR):
+        b = _bus_for(PCA_ADDR)
+        if _bus_has(b, PCA_ADDR):
+            pca_bus = b
+            pca_init()
+            print(_json.dumps({"bus_moved": "pca", "bus": 1 if b is i2c1 else 0}))
+    if not _bus_has(vl_bus, VL_ADDR):
+        b = _bus_for(VL_ADDR)
+        if _bus_has(b, VL_ADDR):
+            vl_bus = b
+            _vl53_init()
+    if not _bus_has(ina_bus, INA_ADDR):
+        b = _bus_for(INA_ADDR)
+        if _bus_has(b, INA_ADDR):
+            ina_bus = b
+            _ina_init()
+
+# ---------------------------------------------------------------------------
 # GPS — NEO-6M via UART0, parse NMEA to lat/lon
 # ---------------------------------------------------------------------------
 _gps_lat = None
@@ -795,6 +845,7 @@ _tick_last_ms = 0
 
 def cmd_sensors():
     global _tick_last_ms
+    _ensure_buses()
     now = time.ticks_ms()
     dt_ms = time.ticks_diff(now, _tick_last_ms) if _tick_last_ms else None
     _tick_last_ms = now
@@ -957,6 +1008,7 @@ def _pca_rd(reg):
     return pca_bus.readfrom_mem(PCA_ADDR, reg, 1)[0]
 
 def cmd_pca_read():
+    _ensure_buses()
     out = {"bus": 1 if pca_bus is i2c1 else 0}
     try:
         scan = [hex(x) for x in pca_bus.scan()]
