@@ -1292,7 +1292,8 @@ def main():
             "accepts private/LAN clients only. Set a token before exposing the port.",
             flush=True,
         )
-    server = http.server.HTTPServer(("0.0.0.0", PORT), SipherHandler)
+    server = http.server.ThreadingHTTPServer(("0.0.0.0", PORT), SipherHandler)
+    server.daemon_threads = True
     print(f"[command_endpoint] listening on 0.0.0.0:{PORT}", flush=True)
     try:
         server.serve_forever()
