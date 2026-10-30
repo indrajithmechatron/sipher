@@ -21,8 +21,10 @@ import ipaddress
 import json
 import os
 import pathlib
+import pty
 import re
 import shlex
+import struct
 import subprocess
 import sys
 import threading
@@ -607,7 +609,63 @@ try:
 except Exception as e:
     print("[auth] seed failed: %s" % e, flush=True)
 
+# ---------------------------------------------------------------------------
+# Minimal WebSocket server (RFC6455) for /api/pty - no external deps.
+# Frames: client->server masked text/binary; server->client unmasked text/binary.
+# Message types used by the browser terminal:
+#   {type:"hello",shell,cwd,fresh} {type:"data",data} {type:"exit",code}
+#   {type:"in",data} {type:"resize",cols,rows} {type:"close"}
+# ---------------------------------------------------------------------------
+_WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC74595"
+
+
+def _ws_accept(key: str) -> str:
+    return base64.b64encode(hashlib.sha1((key + _WS_GUID).encode("ascii")).digest()).decode("ascii")
+
+
+def _ws_write_frame(sock, opcode: int, payload: bytes) -> None:
+    header = bytearray([0x80 | opcode])
+    n = len(payload)
+    if n < 126:
+        header.append(0x80 | n)
+    elif n < 65536:
+        header.append(0x80 | 126)
+        header += struct.pack(">H", n)
+    else:
+        header.append(0x80 | 127)
+        header += struct.pack(">Q", n)
+    mask = os.urandom(4)
+    masked = bytes(b ^ mask[i & 3] for i, b in enumerate(payload))
+    sock.sendall(bytes(header) + mask + masked)
+
+
+def _ws_read_frame(rfile):
+    b1 = rfile.read(1)
+    if not b1:
+        return None
+    b2 = rfile.read(1)
+    if not b2:
+        return None
+    fin = b1[0] >> 7
+    opcode = b1[0] & 0x0F
+    masked = (b2[0] >> 7) & 1
+    ln = b2[0] & 0x7F
+    if ln == 126:
+        ext = rfile.read(2)
+        ln = struct.unpack(">H", ext)[0]
+    elif ln == 127:
+        ext = rfile.read(8)
+        ln = struct.unpack(">Q", ext)[0]
+    mask = rfile.read(4) if masked else b"\x00\x00\x00\x00"
+    data = rfile.read(ln) if ln else b""
+    if masked:
+        data = bytes(x ^ mask[i & 3] for i, x in enumerate(data))
+    return (fin, opcode, data)
+
+
 class SipherHandler(http.server.BaseHTTPRequestHandler):
+    # HTTP/1.1 is required for WebSocket upgrade responses (101 Switching Protocols).
+    protocol_version = "HTTP/1.1"
 
     def log_message(self, format, *args):
         print(f"[http] {args[0]}", flush=True)
@@ -718,7 +776,158 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json({"error": "ai upstream %s failed: %s" % (base, e)}, 502)
 
+    # -- WebSocket (RFC6455) terminal endpoint: /api/pty ------------------------
+    def _handle_pty(self):
+        if self.path.split("?", 1)[0] != "/api/pty":
+            return False
+        # Terminal shells are software access -> admin-or-above only.
+        sess0 = _session_from_request(self)
+        if not sess0:
+            self.send_json({"error": "unauthorized"}, 401)
+            self.close_connection = True
+            return True
+        if (self.headers.get("Upgrade") or "").strip().lower() != "websocket":
+            self.send_json({"error": "websocket upgrade required"}, 400)
+            self.close_connection = True
+            return True
+        key = self.headers.get("Sec-WebSocket-Key")
+        if not key:
+            self.send_json({"error": "missing sec-websocket-key"}, 400)
+            self.close_connection = True
+            return True
+        accept = _ws_accept(key)
+        engine = "bash"
+        try:
+            from urllib.parse import urlparse, parse_qs
+            q = parse_qs(urlparse(self.path).query)
+            eng = (q.get("engine") or ["bash"])[0]
+            if eng:
+                engine = eng
+        except Exception:
+            pass
+        self.send_response(101)
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+
+        master = None
+        slave = None
+        p = None
+        try:
+            master, slave = pty.openpty()
+            p = subprocess.Popen(
+                [engine],
+                stdin=slave,
+                stdout=slave,
+                stderr=slave,
+                cwd=REPO_DIR,
+                start_new_session=True,
+                env={"PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/home/sipher", "TERM": "xterm"},
+            )
+            os.close(slave)
+            slave = None
+            try:
+                import fcntl
+                import termios
+                fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                self.send_json({"error": "pty spawn failed: %s" % e})
+            except Exception:
+                pass
+            self.close_connection = True
+            return True
+
+        def send_msg(obj) -> None:
+            _ws_write_frame(self.connection, 0x1, json.dumps(obj).encode("utf-8"))
+
+        def pump() -> None:
+            try:
+                while True:
+                    try:
+                        data = os.read(master, 4096)
+                    except Exception:
+                        break
+                    if not data:
+                        break
+                    send_msg({"type": "data", "data": data.decode("utf-8", "replace")})
+            except Exception:
+                pass
+            finally:
+                try:
+                    send_msg({"type": "exit", "code": int(p.poll()) if p and p.poll() is not None else 0})
+                except Exception:
+                    pass
+                try:
+                    os.close(master)
+                except Exception:
+                    pass
+
+        threading.Thread(target=pump, daemon=True).start()
+        send_msg({"type": "hello", "shell": engine, "cwd": REPO_DIR, "fresh": True})
+
+        status = "open"
+        try:
+            while status == "open":
+                fr = _ws_read_frame(self.rfile)
+                if fr is None:
+                    status = "closed"
+                    break
+                fin, opcode, data = fr
+                if opcode == 0x8:
+                    status = "closed"
+                    break
+                if opcode == 0x9:
+                    _ws_write_frame(self.connection, 0xA, data)
+                    continue
+                if opcode not in (0x1, 0x2):
+                    continue
+                try:
+                    msg = json.loads(data.decode("utf-8"))
+                except Exception:
+                    continue
+                mtype = msg.get("type")
+                if mtype == "in":
+                    if isinstance(msg.get("data"), str) and p.poll() is None:
+                        try:
+                            os.write(master, msg["data"].encode("utf-8"))
+                        except Exception:
+                            pass
+                elif mtype == "resize":
+                    try:
+                        cols = int(msg.get("cols") or 80)
+                        rows = int(msg.get("rows") or 24)
+                        import fcntl
+                        import termios
+                        fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+                    except Exception:
+                        pass
+                elif mtype == "close":
+                    status = "closed"
+                    break
+        finally:
+            try:
+                if p is not None and p.poll() is None:
+                    p.terminate()
+                if p is not None:
+                    p.wait(timeout=5)
+            except Exception:
+                pass
+            try:
+                os.close(master)
+            except Exception:
+                pass
+            self.close_connection = True
+        return True
+
     def do_GET(self):
+        if self.path.split("?", 1)[0] == "/api/pty":
+            self._handle_pty()
+            return
         if self.path == "/api/ai" or self.path.startswith("/api/ai/"):
             self._ai_proxy(AI_BASE)
         elif self.path == "/api/auth/me":
