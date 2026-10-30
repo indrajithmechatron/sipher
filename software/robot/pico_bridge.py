@@ -39,6 +39,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 PICO_SERIAL = os.environ.get("SIPHER_PICO_SERIAL", "/dev/ttyACM0")
 PICO_BAUD = int(os.environ.get("SIPHER_PICO_BAUD", "115200"))
+DASHBOARD_INTERVAL_MS = int(os.environ.get("SIPHER_DASHBOARD_MS", "1000"))
 TCP_PORT = int(os.environ.get("SIPHER_BRIDGE_PORT", "5000"))
 TCP_HOST = os.environ.get("SIPHER_BRIDGE_HOST", "0.0.0.0")
 
@@ -70,86 +71,95 @@ def pico_status():
 # ---------------------------------------------------------------------------
 # Serial reader — read JSON lines from Pico
 # ---------------------------------------------------------------------------
-def read_pico():
-    """Continuously read JSON lines from Pico serial port."""
-    global _latest_sensor, _serial, _pico_last_rx
+def _close_serial():
+    global _serial, _pico_last_rx
+    try:
+        if _serial is not None and _serial.is_open:
+            _serial.close()
+    except Exception:
+        pass
+    _serial = None
+    _pico_last_rx = 0.0
+
+
+def _open_serial():
+    """Open the Pico port and put it in dashboard mode, retrying forever.
+
+    The port is reopened from scratch every time: a Pico that is unplugged and
+    replugged comes back as a new ttyACM node, while an already-dead file
+    descriptor keeps failing with EIO (OSError 5) however long we wait.
+    """
     while True:
+        ser = None
         try:
-            _serial = serial.Serial(PICO_SERIAL, PICO_BAUD, timeout=2)
-            print(f"[bridge] connected to {PICO_SERIAL}@{PICO_BAUD}", flush=True)
-            break
+            ser = serial.Serial(PICO_SERIAL, PICO_BAUD, timeout=2)
+            time.sleep(2)                       # CDC settles right after open
+            ser.reset_input_buffer()
+            ser.write(json.dumps({"cmd": "dashboard", "interval_ms": DASHBOARD_INTERVAL_MS}).encode() + b"\n")
+            print(f"[bridge] connected to {PICO_SERIAL}@{PICO_BAUD} (dashboard mode)", flush=True)
+            return ser
         except Exception as e:
-            print(f"[bridge] ERROR opening {PICO_SERIAL}: {e}, retrying...", flush=True)
+            print(f"[bridge] ERROR opening {PICO_SERIAL}: {e}, retrying in 3s...", flush=True)
+            try:
+                if ser is not None:
+                    ser.close()
+            except Exception:
+                pass
             time.sleep(3)
 
-    time.sleep(2)
-    with _serial_lock:
-        _serial.reset_input_buffer()
 
-    try:
-        with _serial_lock:
-            _serial.write(json.dumps({"cmd": "dashboard", "interval_ms": 1000}).encode() + b"\n")
-        print("[bridge] enabled dashboard mode on Pico", flush=True)
-    except Exception as e:
-        print(f"[bridge] failed to enable dashboard: {e}", flush=True)
-
-    buf = b""
+def read_pico():
+    """Read JSON lines from the Pico, reopening the port whenever it drops."""
+    global _latest_sensor, _serial, _pico_last_rx
     while True:
+        _serial = _open_serial()
+        buf = b""
         try:
-            with _serial_lock:
-                waiting = _serial.in_waiting
-                if waiting > 0:
-                    chunk = _serial.read(waiting)
-                    buf += chunk
-                else:
-                    pass
-            if b"\n" not in buf:
-                time.sleep(0.05)
-                continue
-
-            while b"\n" in buf:
-                raw, buf = buf.split(b"\n", 1)
-                line = raw.decode(errors="replace").strip()
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                except json.JSONDecodeError:
-                    print(f"[bridge] rx non-json: {line[:160]}", flush=True)
-                    continue
-
-                _pico_last_rx = _now()
-                if isinstance(data, dict) and (
-                    data.get("cmd") == "dashboard_tick"
-                    or any(k in data for k in _SENSOR_KEYS)
-                ):
-                    with _sensor_lock:
-                        _latest_sensor = data
-                    try:
-                        _mapper.feed(data)
-                    except Exception as e:
-                        print(f"[bridge] mapper feed error: {e}", flush=True)
-                    print(
-                        f"[bridge] rx tick mpu={bool(data.get('mpu'))} "
-                        f"vl53={data.get('vl53_mm')} ina={bool(data.get('ina'))} "
-                        f"gps_fix={bool((data.get('gps') or {}).get('fix'))}",
-                        flush=True,
-                    )
-                else:
-                    print(f"[bridge] rx json: {json.dumps(data)[:200]}", flush=True)
-                broadcast(data)
-        except serial.SerialException:
-            print("[bridge] serial disconnected, reconnecting in 5s...", flush=True)
-            time.sleep(5)
-            try:
-                if _serial and _serial.is_open:
-                    _serial.close()
-                _serial = serial.Serial(PICO_SERIAL, PICO_BAUD, timeout=2)
+            while True:
                 with _serial_lock:
-                    _serial.reset_input_buffer()
-                print("[bridge] reconnected to serial", flush=True)
-            except Exception:
-                time.sleep(3)
+                    waiting = _serial.in_waiting
+                    chunk = _serial.read(waiting) if waiting > 0 else b""
+                if not chunk:
+                    time.sleep(0.05)
+                    continue
+                buf += chunk
+
+                while b"\n" in buf:
+                    raw, buf = buf.split(b"\n", 1)
+                    line = raw.decode(errors="replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        print(f"[bridge] rx non-json: {line[:160]}", flush=True)
+                        continue
+
+                    _pico_last_rx = _now()
+                    if isinstance(data, dict) and (
+                        data.get("cmd") == "dashboard_tick"
+                        or any(k in data for k in _SENSOR_KEYS)
+                    ):
+                        with _sensor_lock:
+                            _latest_sensor = data
+                        try:
+                            _mapper.feed(data)
+                        except Exception as e:
+                            print(f"[bridge] mapper feed error: {e}", flush=True)
+                        print(
+                            f"[bridge] rx tick mpu={bool(data.get('mpu'))} "
+                            f"vl53={data.get('vl53_mm')} ina={bool(data.get('ina'))} "
+                            f"gps_fix={bool((data.get('gps') or {}).get('fix'))}",
+                            flush=True,
+                        )
+                    else:
+                        print(f"[bridge] rx json: {json.dumps(data)[:200]}", flush=True)
+                    broadcast(data)
+        except (serial.SerialException, OSError) as e:
+            # Includes errno 5 (EIO) from a stale fd after the Pico re-enumerated.
+            print(f"[bridge] serial lost ({e}) - reopening {PICO_SERIAL}", flush=True)
+            _close_serial()
+            time.sleep(2)
         except Exception as e:
             print(f"[bridge] read error: {e}", flush=True)
             time.sleep(1)
