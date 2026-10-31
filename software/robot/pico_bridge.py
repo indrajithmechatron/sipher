@@ -393,6 +393,18 @@ def main():
     http_thread = threading.Thread(target=http_server, daemon=True)
     http_thread.start()
 
+    # Heartbeat to the Pico (keeps the bridge-connection LED alive)
+    def _heartbeat_loop():
+        while True:
+            try:
+                forward_to_pico({"cmd": "heartbeat"})
+            except Exception:
+                pass
+            time.sleep(5)
+
+    hb_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+    hb_thread.start()
+
     # Keep main thread alive
     try:
         while True:

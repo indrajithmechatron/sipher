@@ -459,6 +459,80 @@ def read_ina():
 
 
 _ina_init()
+# Touch sensors (TTP223 on GP6 = e-stop, GP7 = admin unlock)
+ESTOP_PIN = 6
+ADMIN_PIN = 7
+try:
+    estop_pin = machine.Pin(ESTOP_PIN, machine.Pin.IN)
+    admin_pin = machine.Pin(ADMIN_PIN, machine.Pin.IN)
+except Exception:
+    estop_pin = None
+    admin_pin = None
+
+_estop_active = False
+_admin_unlocked = False
+_last_estop_ms = 0
+_admin_hold_start = 0
+_admin_hold_triggered = False
+_ADMIN_HOLD_MS = 2000
+
+def _estop_trigger():
+    global _estop_active, _last_estop_ms
+    now = time.ticks_ms()
+    if time.ticks_diff(now, _last_estop_ms) < 300:
+        return
+    _last_estop_ms = now
+    _estop_active = True
+    cmd_relax_all()
+    print(_json.dumps({cmd: estop, active: True}), flush=True)
+
+def _estop_irq(pin):
+    _estop_trigger()
+
+if estop_pin is not None:
+    try:
+        estop_pin.irq(trigger=machine.Pin.IRQ_RISING, handler=_estop_irq)
+    except Exception:
+        pass
+
+def _admin_hold_check():
+    global _admin_hold_start, _admin_hold_triggered, _admin_unlocked
+    if admin_pin is None:
+        return
+    if admin_pin.value():
+        if _admin_hold_start == 0:
+            _admin_hold_start = time.ticks_ms()
+        elif not _admin_hold_triggered and time.ticks_diff(time.ticks_ms(), _admin_hold_start) > _ADMIN_HOLD_MS:
+            _admin_hold_triggered = True
+            _admin_unlocked = True
+            print(_json.dumps({cmd: admin_unlock, unlocked: True}), flush=True)
+    else:
+        _admin_hold_start = 0
+        _admin_hold_triggered = False
+
+def cmd_estop():
+    global _estop_active
+    _estop_active = True
+    cmd_relax_all()
+    return {estop: activated}
+
+def cmd_estop_clear():
+    global _estop_active
+    _estop_active = False
+    return {estop: cleared}
+
+def cmd_admin_unlock():
+    global _admin_unlocked
+    _admin_unlocked = True
+    return {admin_unlock: unlocked}
+
+def cmd_admin_lock():
+    global _admin_unlocked
+    _admin_unlocked = False
+    return {admin_unlock: locked}
+
+def cmd_admin_status():
+    return {admin_unlocked: _admin_unlocked, estop_active: _estop_active}
 
 # ---------------------------------------------------------------------------
 # Bus re-resolution — the servo/sensor board can power up after the Pico
@@ -872,6 +946,8 @@ def cmd_sensors():
         "dt_ms": dt_ms,
         "i2c0": _scan_cache["i2c0"],
         "i2c1": _scan_cache["i2c1"],
+        "estop": _estop_active,
+        "admin_unlocked": _admin_unlocked,
         "_meta": {
             "pico": pico_online,
             "pico_age_ms": pico_age_ms,
@@ -881,6 +957,8 @@ def cmd_sensors():
 
 
 def cmd_servo(ch, deg):
+    if _estop_active:
+        return {"servo": "estop_active"}
     if not isinstance(ch, int) or ch < 0 or ch > 15:
         return {"servo": "bad_ch"}
     if isinstance(deg, (int, float)) and deg > 500:
@@ -1200,6 +1278,12 @@ CMD_MAP = {
     "ping": (lambda p: cmd_ping()),
     "time": (lambda p: cmd_set_time(p.get("set", 0)) if "set" in p else cmd_get_time()),
     "status": (lambda p: cmd_status()),
+    "estop": (lambda p: cmd_estop()),
+    "estop_clear": (lambda p: cmd_estop_clear()),
+    "admin_unlock": (lambda p: cmd_admin_unlock()),
+    "admin_lock": (lambda p: cmd_admin_lock()),
+    "admin_status": (lambda p: cmd_admin_status()),
+    "heartbeat": (lambda p: cmd_heartbeat()),
     "led": (lambda p: cmd_led(p.get("on", False))),
     "nrf_init": (lambda p: nrf_init(p.get("channel", 76), p.get("rate", 250000), p.get("pa", "MAX"))),
     "nrf_send": (lambda p: nrf_send(p.get("data", ""), p.get("pipe", "e1f0f0f0f0"))),
@@ -1236,6 +1320,7 @@ def main():
             poller = None
     while True:
         try:
+            _admin_hold_check()
             if _dashboard_running and _dashboard_interval > 0:
                 if time.ticks_diff(time.ticks_ms(), last_tick) >= _dashboard_interval:
                     last_tick = time.ticks_ms()
