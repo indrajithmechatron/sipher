@@ -251,7 +251,7 @@ Each phase ends with a verifiable checkpoint and is individually revertible.
 | **R0** | 2 GB swapfile + Docker Engine | `swapon --show`; `docker run hello-world` |
 | **R1** | ROS 2 Jazzy `ros-base` + deps apt install | `ros2 doctor` pass; `ros2 pkg list` works |
 | **R2** ✅ 2026-11-03 | `sipher_msgs` + `sipher_driver` node; **serial cutover** | `ros2 topic echo /sensors` streams live Pico data ✅ (0.99 Hz); `ros2 topic pub /servo_cmd` moved ch0 90→70→90° ✅; rosbag2 `bags/r2_checkpoint_bag` ✅; bridge stopped/disabled, `sipher-ros` active; legacy TCP:5000 + HTTP:5001 verified. *Gotcha fixed: never run `ros2` as root (FastDDS `/dev/shm` ownership) — see `ros2_ws/README.md`* |
-| **R3** | `sipher_control` (/estop latched, relax, services) + `sipher_diagnostics` | `/estop` asserted → driver refuses motion; `/diagnostics` shows all devices OK |
+| **R3** ✅ 2026-11-03 | `sipher_control` (/estop latched, relax, services) + `sipher_diagnostics` | `/estop` asserted via `set_estop` → driver refuses motion (dropped servo_cmd, ch0 held at 90°) ✅; `clear_estop` → servo moved ✅; `/diagnostics` all devices OK @1 Hz ✅; latched `/estop_cmd` survives driver restart |
 | **R3b** | ros2_control `SystemInterface` + `joint_state_broadcaster` | `/joint_states` streams; controller switch via `ros2 control` |
 | **R4** | `command_endpoint` backend → rclpy gateway (**HTTP API unchanged**) | dashboard login + `/api/bridge_cmd` → `/servo_cmd` moves servo; 25 unit tests green |
 | **R5** | Node-RED + n8n Docker stack + UFW rules | both UIs login via LAN; containers healthy |

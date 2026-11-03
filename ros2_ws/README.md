@@ -34,6 +34,19 @@ ros2 launch sipher_ros sipher.launch.py
 | `/servo_cmd` | `sipher_msgs/ServoCmd` | ch + deg |
 | `/servo_cmds` | `sipher_msgs/ServoCmdArray` | one gait frame |
 | `/cmd_raw` | `std_msgs/String` | JSON passthrough (any firmware cmd) |
+| `/estop_cmd` | `std_msgs/Bool` | latched software e-stop from `sipher_control` |
+| `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | 1 Hz health (R3) |
+| `/sipher/events` | `sipher_msgs/SipherEvent` | discrete events (estop, ...) |
+
+### Services (R3, `sipher_control`)
+
+| Service | Type | Effect |
+|---|---|---|
+| `/sipher_control/set_estop` | `std_srvs/SetBool` | assert/clear software e-stop (latched) |
+| `/sipher_control/clear_estop` | `std_srvs/Trigger` | convenience clear |
+| `/sipher_control/relax` | `std_srvs/Trigger` | publish `/relax` (park) |
+
+Effective e-stop = **firmware OR software**; the driver refuses motion while asserted.
 
 `build/`, `install/`, `log/` are gitignored.
 
