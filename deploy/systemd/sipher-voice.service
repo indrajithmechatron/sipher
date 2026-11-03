@@ -1,0 +1,20 @@
+[Unit]
+Description=Sipher Layer-1 voice agent (wake word "sipher"/"buddy" + Groq STT/LLM/TTS)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sipher
+WorkingDirectory=/home/sipher/sipher/software/voice
+ExecStart=/usr/bin/python3 /home/sipher/sipher/software/voice/agent.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+# GROQ_API_KEY lives outside the repo (Security rule 6, docs/ARCHITECTURE.md):
+#   /home/sipher/.config/sipher/voice.env  (chmod 600, key=value lines)
+EnvironmentFile=-/home/sipher/.config/sipher/voice.env
+
+[Install]
+WantedBy=multi-user.target
