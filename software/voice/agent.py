@@ -7,7 +7,7 @@
 #   3. WAV goes to Groq whisper-large-v3-turbo for transcription
 #   4. Transcript must contain the wake word ("sipher" / "buddy") to open an
 #      ACTIVE session; follow-ups stay active for SIPHER_ACTIVE_SECONDS
-#   5. Question goes to Groq llama-3.1-8b-instant, short spoken-style answer;
+#   5. Question goes to Groq openai/gpt-oss-20b, short spoken-style answer;
 #      data questions get live /api/voice/context telemetry in the prompt
 #   6. "rotate channel 0 to 100 degrees" is parsed and sent to the robot bridge
 #      through the command endpoint (/api/voice/command)
@@ -47,7 +47,7 @@ FRAME_BYTES = RATE * 2 * FRAME_MS // 1000   # S16_LE mono
 SILENCE_END_S = 0.9                 # trailing silence that closes an utterance
 MAX_UTTERANCE_S = 12.0              # hard cap so runaway noise still gets sent
 ACTIVE_SECONDS = float(os.getenv("SIPHER_ACTIVE_SECONDS", "25"))
-CHAT_MODEL = os.getenv("SIPHER_AGENT_MODEL", "llama-3.1-8b-instant")
+CHAT_MODEL = os.getenv("SIPHER_AGENT_MODEL", "openai/gpt-oss-20b")
 API = os.getenv("SIPHER_API", "http://127.0.0.1:8888").rstrip("/")
 STT_MODEL = "whisper-large-v3-turbo"
 WAKE_WORDS = ("sipher", "buddy")
@@ -219,13 +219,20 @@ def answer(question, context=""):
         })
     HISTORY.append({"role": "user", "content": question})
     del HISTORY[:-8]
+    kwargs = dict(
+        model=CHAT_MODEL,
+        messages=messages + HISTORY,
+        max_tokens=200,
+        temperature=0.6,
+    )
+    if CHAT_MODEL.startswith("openai/gpt-oss"):
+        kwargs["reasoning_effort"] = "low"   # keep voice answers fast
     try:
-        res = CLIENT.chat.completions.create(
-            model=CHAT_MODEL,
-            messages=messages + HISTORY,
-            max_tokens=160,
-            temperature=0.6,
-        )
+        try:
+            res = CLIENT.chat.completions.create(**kwargs)
+        except Exception:
+            kwargs.pop("reasoning_effort", None)
+            res = CLIENT.chat.completions.create(**kwargs)
         reply = res.choices[0].message.content.strip()
         HISTORY.append({"role": "assistant", "content": reply})
         del HISTORY[:-8]

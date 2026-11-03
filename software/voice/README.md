@@ -63,7 +63,7 @@ Environment variables:
 | `GROQ_API_KEY` | — | required; read from env or `~/.config/sipher/voice.env` |
 | `SIPHER_MIC` | `plughw:CARD=Device,DEV=0` | ALSA capture device |
 | `SIPHER_ACTIVE_SECONDS` | `25` | follow-up window after the wake word |
-| `SIPHER_AGENT_MODEL` | `llama-3.1-8b-instant` | Groq chat model |
+| `SIPHER_AGENT_MODEL` | `openai/gpt-oss-20b` | Groq chat model |
 | `SIPHER_API` | `http://127.0.0.1:8888` | command endpoint (feed + commands + telemetry) |
 
 ### Run as a service
