@@ -347,6 +347,14 @@ class SipherDriver(Node):
                 raw = self._latest_raw
         if not isinstance(data, dict):
             return
+        try:
+            self._publish_tick(data, raw)
+        except Exception as e:
+            # Never let one malformed payload kill the driver (it owns the
+            # serial port and the legacy endpoints).
+            self.get_logger().error(f"publish failed: {e}", throttle_duration_sec=5)
+
+    def _publish_tick(self, data, raw):
         stamp = self.get_clock().now().to_msg()
 
         if "pca" in data or "mpu" in data or "vl53_mm" in data:
@@ -463,10 +471,12 @@ class SipherDriver(Node):
         msg.header.frame_id = "base_link"
         msg.voltage = float(ina.get("voltage_v") or 0.0)
         msg.current = float(ina.get("current_ma") or 0.0) / 1000.0
-        msg.power = float(ina.get("power_mw") or 0.0) / 1000.0
         msg.percentage = float("nan")  # no fuel gauge — voltage only
         msg.temperature = float("nan")
-        msg.status = BatteryState.POWER_STATUS_UNKNOWN
+        msg.present = True
+        msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_DISCHARGING
+        msg.power_supply_health = BatteryState.POWER_SUPPLY_HEALTH_GOOD
+        msg.power_supply_technology = BatteryState.POWER_SUPPLY_TECHNOLOGY_UNKNOWN
         return msg
 
     @staticmethod
