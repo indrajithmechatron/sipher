@@ -250,7 +250,10 @@ class Listener:
     def read_frame(self):
         buf = self.proc.stdout.read(FRAME_BYTES)
         if len(buf) < FRAME_BYTES:
-            raise RuntimeError("arecord stream ended")
+            rc = self.proc.poll()
+            raise RuntimeError(
+                f"arecord stream ended (rc={rc}) - mic busy? "
+                "check `sudo fuser -v /dev/snd/*` or another voice service")
         return buf
 
     def utterance(self, speaking):
