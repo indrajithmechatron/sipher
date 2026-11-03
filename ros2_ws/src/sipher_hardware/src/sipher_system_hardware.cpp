@@ -20,6 +20,7 @@
 
 #include "hardware_interface/handle.hpp"
 #include "hardware_interface/hardware_component_interface.hpp"
+#include "hardware_interface/system_interface.hpp"
 #include "hardware_interface/types/hardware_interface_return_values.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
