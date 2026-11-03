@@ -55,7 +55,6 @@ public:
     states_rad_.assign(joint_names_.size(), std::nan(""));
     commands_rad_.assign(joint_names_.size(), std::nan(""));
 
-    // Internal node on the controller_manager's executor (Jazzy params API).
     node_ = std::make_shared<rclcpp::Node>(
       "sipher_hardware_node",
       rclcpp::NodeOptions().automatically_declare_parameters_from_overrides(true));
@@ -69,7 +68,7 @@ public:
             if (msg->name[j] == joint_names_[i]) {
               states_rad_[i] = msg->position[j];
               if (!seeded_) {
-                commands_rad_[i] = states_rad_[i];  // hold initial pose
+                commands_rad_[i] = states_rad_[i];
               }
               break;
             }
@@ -123,7 +122,6 @@ public:
   hardware_interface::return_type read(
     const rclcpp::Time &, const rclcpp::Duration &) override
   {
-    // State is refreshed by the /sensors callback; nothing to do here.
     return hardware_interface::return_type::OK;
   }
 
@@ -131,7 +129,7 @@ public:
     const rclcpp::Time &, const rclcpp::Duration &) override
   {
     if (!have_sensors_) {
-      return hardware_interface::return_type::OK;  // don't command blind
+      return hardware_interface::return_type::OK;
     }
     sipher_msgs::msg::ServoCmdArray frame;
     frame.commands.reserve(joint_names_.size());
@@ -140,7 +138,7 @@ public:
       for (size_t i = 0; i < joint_names_.size(); ++i) {
         const double rad = commands_rad_[i];
         if (!std::isfinite(rad)) {
-          continue;  // uncommanded channel: leave it where it is
+          continue;
         }
         sipher_msgs::msg::ServoCmd cmd;
         cmd.ch = static_cast<uint8_t>(i);
@@ -154,16 +152,11 @@ public:
     return hardware_interface::return_type::OK;
   }
 
-  hardware_interface::CallbackReturn on_cleanup(const rclcpp::Time &) override
-  {
-    return hardware_interface::CallbackReturn::SUCCESS;
-  }
-
 private:
   hardware_interface::HardwareInfo info_;
   std::vector<std::string> joint_names_;
-  std::vector<double> states_rad_;    // exported state interfaces (pointers)
-  std::vector<double> commands_rad_;  // exported command interfaces (pointers)
+  std::vector<double> states_rad_;
+  std::vector<double> commands_rad_;
   std::mutex mutex_;
   std::atomic<bool> have_sensors_{false};
   bool seeded_{false};
