@@ -50,7 +50,7 @@ ACTIVE_SECONDS = float(os.getenv("SIPHER_ACTIVE_SECONDS", "25"))
 CHAT_MODEL = os.getenv("SIPHER_AGENT_MODEL", "openai/gpt-oss-20b")
 API = os.getenv("SIPHER_API", "http://127.0.0.1:8888").rstrip("/")
 STT_MODEL = "whisper-large-v3-turbo"
-WAKE_WORDS = ("sipher", "buddy")
+WAKE_WORDS = ("sipher", "cipher", "cypher", "sifer", "syfer", "buddy")
 SYSTEM_PROMPT = (
     "You are Sipher, a friendly four-legged spider-style quadruped robot built "
     "around a Raspberry Pi 4. Your human talks to you by voice, so reply with "
@@ -312,7 +312,9 @@ def main():
         now = time.time()
         woke = any(w in text for w in WAKE_WORDS)
         if woke:
-            body = re.sub(r"\b(?:sipher|cipher|ssy for|buddy)\b", "", text).strip(" ,.!")
+            body = re.sub(r"\b(?:sipher|cipher|cypher|sifer|syfer|buddy)\b", " ", text)
+            body = re.sub(r"^(?:hey|ok|okay|yo)\b", " ", body.strip())
+            body = body.strip(" ,.!?")
             tag = "wake"
         else:
             body = text
