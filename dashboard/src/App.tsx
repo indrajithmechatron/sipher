@@ -13,6 +13,7 @@ import { CommandPalette, type Command } from "@/components/mc/CommandPalette";
 import { ProjectManager, PROJECTS, type Project } from "@/components/mc/ProjectManager";
 import { CustomerDashboard } from "@/components/mc/CustomerDashboard";
 import { CameraMap, MemoryViewer, MissionEditor, RosGraph } from "@/components/mc/Panels";
+import { VoiceConsole } from "@/components/mc/VoiceConsole";
 import { PRESETS, TABS, TERMINALS, type PresetId } from "@/components/mc/data";
 import { useSipherTelemetry } from "@/components/mc/sipher";
 import { THEMES, useTheme } from "@/components/mc/theme";
@@ -141,6 +142,8 @@ export default function App() {
         return <RosGraph />;
       case "memory-viewer":
         return <MemoryViewer />;
+      case "voice-console":
+        return <VoiceConsole />;
       default:
         return <DigitalTwin tele={tele} />;
     }

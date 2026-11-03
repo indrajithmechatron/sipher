@@ -26,6 +26,21 @@ USB mic → arecord pipe → adaptive energy VAD → WAV
 - "sipher, what is my battery voltage?" is answered immediately.
 - The mic is ignored while Sipher is speaking, so it does not answer itself.
 
+### Commands and live dashboard data
+
+- **Servo moves** — "rotate channel 0 to 100 degrees", "move servo 3 to 90
+  degrees" (channels 0–15, angles 0–180) are parsed locally and sent through
+  the command endpoint as `POST /api/voice/command {ch, deg}`. The endpoint
+  validates the range and forwards `{"cmd":"servo",...}` to the Layer-2 bridge
+  — voice never opens the serial port itself.
+- **Data questions** — anything mentioning battery, voltage, CPU, temperature,
+  distance, IMU, GPS, status, etc. fetches a live snapshot from
+  `GET /api/voice/context` and puts the real numbers in the Groq prompt.
+- **Live feed** — every transcript, action and answer is mirrored to
+  `POST /api/voice/log`; the dashboard polls `GET /api/voice/log?since=N` and
+  shows it in the **Voice Console** panel and the **voice** terminal tab.
+  Other agents can tail the same endpoint.
+
 ### Setup on the Pi
 
 ```bash
@@ -49,6 +64,7 @@ Environment variables:
 | `SIPHER_MIC` | `plughw:CARD=Device,DEV=0` | ALSA capture device |
 | `SIPHER_ACTIVE_SECONDS` | `25` | follow-up window after the wake word |
 | `SIPHER_AGENT_MODEL` | `llama-3.1-8b-instant` | Groq chat model |
+| `SIPHER_API` | `http://127.0.0.1:8888` | command endpoint (feed + commands + telemetry) |
 
 ### Run as a service
 

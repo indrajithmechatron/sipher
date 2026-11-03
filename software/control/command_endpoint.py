@@ -13,6 +13,7 @@ Architecture:
 """
 
 import base64
+import collections
 import hashlib
 import hmac
 import secrets
@@ -87,6 +88,52 @@ _pi_stats = {"cpu_pct": None, "cpu_temp_c": None, "load1": None, "load5": None,
              "load15": None, "mem_used_pct": None, "mem_free_mb": None,
              "disk_used_pct": None, "uptime_s": None, "cores": None}
 _cpu_prev = {}
+
+# ---------------------------------------------------------------------------
+# Voice event feed - Layer 1 (software/voice/agent.py) publishes what it heard,
+# what it did and what it answered. The dashboard renders this live and other
+# agents can tail the same stream. In-memory, capped, private clients only.
+# ---------------------------------------------------------------------------
+_voice_lock = threading.Lock()
+_voice_events = collections.deque(maxlen=500)
+_voice_seq = 0
+
+
+def _voice_append(role, text, action=None):
+    global _voice_seq
+    with _voice_lock:
+        _voice_seq += 1
+        _voice_events.append({
+            "seq": _voice_seq,
+            "ts": round(time.time(), 3),
+            "role": str(role),
+            "text": str(text)[:2000],
+            "action": action,
+        })
+        return _voice_seq
+
+
+def _bridge_send(req, timeout=3):
+    """Send one JSON command to the bridge (Layer 2) and read one reply line."""
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(timeout)
+        sock.connect(("127.0.0.1", 5000))
+        sock.sendall((json.dumps(req) + "\n").encode())
+        buf = b""
+        while b"\n" not in buf:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+        line = buf.split(b"\n", 1)[0].decode(errors="replace").strip()
+        return json.loads(line) if line else {"bridge": "ok"}
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
 
 def _read_float(path):
     try:
@@ -949,6 +996,10 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(get_pi_stats())
         elif self.path.startswith("/api/rag"):
             self.handle_rag("GET")
+        elif self.path.startswith("/api/voice/log"):
+            self.handle_voice_log_get()
+        elif self.path == "/api/voice/context":
+            self.handle_voice_context()
         elif self.path.startswith("/api/map"):
             self.handle_map()
         elif self.path == "/api/info":
@@ -978,6 +1029,10 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
             self.handle_command()
         elif self.path == "/api/bridge_cmd":
             self.handle_bridge_cmd()
+        elif self.path == "/api/voice/log":
+            self.handle_voice_log_post()
+        elif self.path == "/api/voice/command":
+            self.handle_voice_command()
         elif self.path == "/api/ai/transcribe":
             self._ai_proxy(ASR_BASE, strip=False)
         elif self.path == "/api/auth/login":
@@ -996,6 +1051,84 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
             self.handle_rag("POST")
         else:
             self.send_json({"error": "not found"}, 404)
+
+    # ------------------------------------------------------------------
+    # Voice feed (Layer 1 -> dashboard + agents)
+    # ------------------------------------------------------------------
+    def handle_voice_log_get(self):
+        """GET /api/voice/log?since=N -> transcript/action events after N."""
+        query = self.path.split("?", 1)[1] if "?" in self.path else ""
+        since = 0
+        for part in query.split("&"):
+            if part.startswith("since="):
+                try:
+                    since = int(part.split("=", 1)[1])
+                except ValueError:
+                    since = 0
+        with _voice_lock:
+            events = [e for e in _voice_events if e["seq"] > since]
+            seq = _voice_seq
+        self.send_json({"seq": seq, "events": events})
+
+    def handle_voice_log_post(self):
+        """POST /api/voice/log {role, text, action?} — publish one event."""
+        allowed, reason = command_authorized(
+            self.client_address[0], self.headers.get("X-Sipher-Token", ""))
+        if not allowed:
+            self.send_json({"error": reason}, 403)
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, json.JSONDecodeError):
+            self.send_json({"error": "invalid json"}, 400)
+            return
+        if not isinstance(body, dict) or not str(body.get("text", "")).strip():
+            self.send_json({"error": "text required"}, 400)
+            return
+        role = str(body.get("role", "user"))
+        if role not in ("user", "assistant", "action", "error", "wake"):
+            role = "user"
+        seq = _voice_append(role, body["text"], body.get("action"))
+        self.send_json({"ok": True, "seq": seq})
+
+    def handle_voice_context(self):
+        """GET /api/voice/context — live sensor + Pi snapshot for spoken answers."""
+        allowed, reason = command_authorized(
+            self.client_address[0], self.headers.get("X-Sipher-Token", ""))
+        if not allowed:
+            self.send_json({"error": reason}, 403)
+            return
+        self.send_json({
+            "now": time.time(),
+            "sensors": get_latest_sensor(),
+            "pi": get_pi_stats(),
+        })
+
+    def handle_voice_command(self):
+        """POST /api/voice/command {ch, deg} — validated servo move via Layer 2."""
+        allowed, reason = command_authorized(
+            self.client_address[0], self.headers.get("X-Sipher-Token", ""))
+        if not allowed:
+            self.send_json({"error": reason}, 403)
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            ch, deg = int(body["ch"]), int(body["deg"])
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+            self.send_json({"error": "expected {\"ch\": 0-15, \"deg\": 0-180}"}, 400)
+            return
+        if not (0 <= ch <= 15 and 0 <= deg <= 180):
+            self.send_json({"error": "ch must be 0-15 and deg 0-180"}, 400)
+            return
+        req = {"cmd": "servo", "ch": ch, "deg": deg}
+        try:
+            reply = _bridge_send(req)
+        except Exception as e:
+            self.send_json({"error": f"bridge unreachable: {e}"}, 503)
+            return
+        self.send_json({"ok": True, "sent": req, "bridge": reply})
 
     def handle_rag(self, method):
         """Serve the retrieval layer (Layer 1) at /api/rag/*.

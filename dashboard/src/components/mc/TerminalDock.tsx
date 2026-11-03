@@ -7,6 +7,7 @@ import { TERMINALS, TERMINAL_LINES } from "./data";
 import { cn } from "@/lib/utils";
 import { Dot } from "./chrome";
 import { AIChat } from "./AIChat";
+import { VoiceConsole } from "./VoiceConsole";
 import type { Telemetry } from "./sipher";
 
 type Line = { c: string; text: string; partial?: boolean };
@@ -292,6 +293,7 @@ export function TerminalBody({ id, tele }: { id: string; tele?: Telemetry }) {
     );
   }
   if (id === "powershell") return <PowerShellSession />;
+  if (id === "voice") return <VoiceConsole />;
   let live: { c: string; text: string }[] = [];
   if (tele && id === "agent") {
     live = tele.events.slice(0, 8).map((e) => ({

@@ -7,8 +7,13 @@
 #   3. WAV goes to Groq whisper-large-v3-turbo for transcription
 #   4. Transcript must contain the wake word ("sipher" / "buddy") to open an
 #      ACTIVE session; follow-ups stay active for SIPHER_ACTIVE_SECONDS
-#   5. Question goes to Groq llama-3.1-8b-instant, short spoken-style answer
-#   6. Answer is spoken with piper (if installed) or espeak
+#   5. Question goes to Groq llama-3.1-8b-instant, short spoken-style answer;
+#      data questions get live /api/voice/context telemetry in the prompt
+#   6. "rotate channel 0 to 100 degrees" is parsed and sent to the robot bridge
+#      through the command endpoint (/api/voice/command)
+#   7. Every transcript/action/answer is mirrored to the dashboard
+#      (/api/voice/log) so the voice console and agents see it live
+#   8. Answer is spoken with piper (if installed) or espeak
 #
 # Secrets: GROQ_API_KEY is read from the environment — never committed.
 # Run: python3 agent.py   (or via deploy/systemd/sipher-voice.service)
@@ -20,6 +25,7 @@
 #   SIPHER_AGENT_MODEL    chat model (default llama-3.1-8b-instant)
 
 import io
+import json
 import os
 import re
 import sys
@@ -30,6 +36,7 @@ import shutil
 import subprocess
 import threading
 import math
+import urllib.request
 
 # ---------------------------------------------------------------- config
 
@@ -41,6 +48,7 @@ SILENCE_END_S = 0.9                 # trailing silence that closes an utterance
 MAX_UTTERANCE_S = 12.0              # hard cap so runaway noise still gets sent
 ACTIVE_SECONDS = float(os.getenv("SIPHER_ACTIVE_SECONDS", "25"))
 CHAT_MODEL = os.getenv("SIPHER_AGENT_MODEL", "llama-3.1-8b-instant")
+API = os.getenv("SIPHER_API", "http://127.0.0.1:8888").rstrip("/")
 STT_MODEL = "whisper-large-v3-turbo"
 WAKE_WORDS = ("sipher", "buddy")
 SYSTEM_PROMPT = (
@@ -96,6 +104,66 @@ def wav_bytes(samples):
     return buf.getvalue()
 
 
+# ---------------------------------------------------------------- dashboard feed
+
+def api(path, payload=None, timeout=4):
+    """Call the Pi command endpoint (Layer 4/1 seam)."""
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(
+        API + path, data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode() or "{}")
+
+
+def publish(role, text, action=None):
+    """Mirror an exchange to the dashboard voice console (best effort)."""
+    try:
+        api("/api/voice/log", {"role": role, "text": text, "action": action})
+    except Exception as e:
+        print("feed error:", e, flush=True)
+
+
+def live_context():
+    """Compact live sensor/Pi snapshot so answers use real dashboard data."""
+    try:
+        snap = api("/api/voice/context", timeout=3)
+    except Exception:
+        return ""
+    return json.dumps(
+        {"sensors": snap.get("sensors") or {}, "pi": snap.get("pi") or {}},
+        default=str)[:4000]
+
+
+# ---------------------------------------------------------------- intent parsing
+
+SERVO_CHANNEL = re.compile(
+    r"(?:channel|servo|ch)\s*(\d{1,2})\s*(?:to|at|->|=)?\s*(\d{1,3})\s*"
+    r"(?:degrees?|deg|°)",
+    re.I)
+SERVO_PLAIN = re.compile(
+    r"(?:rotate|move|turn|swing|set|drive)\s+(?:the\s+)?"
+    r"(?:servo\s+|channel\s+|ch\s+)?(\d{1,2})\s*(?:to|at|->|=)\s*(\d{1,3})",
+    re.I)
+
+DATA_WORDS = (
+    "battery", "voltage", "current", "power", "temperature", "temp", "cpu",
+    "memory", "ram", "disk", "sensor", "sensors", "distance", "range",
+    "lidar", "tof", "imu", "pitch", "roll", "yaw", "gps", "status", "health",
+    "data", "reading", "readings", "uptime",
+)
+
+
+def parse_servo(text):
+    """'rotate channel 0 to 100 degrees' -> (0, 100); None if not a servo move."""
+    for rx in (SERVO_CHANNEL, SERVO_PLAIN):
+        m = rx.search(text)
+        if m:
+            ch, deg = int(m.group(1)), int(m.group(2))
+            if 0 <= ch <= 15 and 0 <= deg <= 180:
+                return ch, deg
+    return None
+
+
 def speak(text, speaking_flag):
     """TTS off the hot path; the mic is ignored while the flag is set."""
     def run():
@@ -140,14 +208,21 @@ def transcribe(audio):
 HISTORY = []
 
 
-def answer(question):
+def answer(question, context=""):
     """Question text → spoken-style answer from Groq chat."""
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if context:
+        messages.append({
+            "role": "system",
+            "content": ("Live dashboard telemetry for this question (use the real "
+                        "numbers, do not invent values): " + context),
+        })
     HISTORY.append({"role": "user", "content": question})
     del HISTORY[:-8]
     try:
         res = CLIENT.chat.completions.create(
             model=CHAT_MODEL,
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + HISTORY,
+            messages=messages + HISTORY,
             max_tokens=160,
             temperature=0.6,
         )
@@ -237,12 +312,37 @@ def main():
         print(f"[{tag}] heard: {body or text!r}", flush=True)
         if not body:                                   # just the wake word
             active_until = now + ACTIVE_SECONDS
+            publish("wake", "wake word detected")
             speak("Yes?", speaking)
             continue
         if woke:
-            active_until = now + ACTIVE_SECONDS    # prompt may follow its own answers
-        reply = answer(body)
+            active_until = now + ACTIVE_SECONDS
+        publish("user", body)
+
+        move = parse_servo(body)
+        if move:
+            ch, deg = move
+            try:
+                res = api("/api/voice/command", {"ch": ch, "deg": deg})
+                publish("action", f"servo ch{ch} -> {deg} deg", res)
+                ok = bool(res.get("ok"))
+                reply = (f"moving channel {ch} to {deg} degrees" if ok
+                         else "the bridge rejected that move")
+            except Exception as e:
+                publish("error", f"servo ch{ch} -> {deg} deg failed: {e}")
+                reply = "I could not reach the robot bridge."
+            print("reply:", reply, flush=True)
+            publish("assistant", reply)
+            active_until = max(active_until, time.time() + 15)
+            speak(reply, speaking)
+            continue
+
+        context = ""
+        if any(w in body for w in DATA_WORDS):
+            context = live_context()
+        reply = answer(body, context)
         print("reply:", reply, flush=True)
+        publish("assistant", reply)
         # keep the session alive a beat longer than the answer duration
         active_until = max(active_until, time.time() + 15)
         speak(reply, speaking)

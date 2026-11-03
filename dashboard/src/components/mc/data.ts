@@ -11,7 +11,7 @@ export const PRESETS: { id: PresetId; label: string; short: string; tabs: string
     id: "robot-control",
     label: "Robot Control",
     short: "CTL",
-    tabs: ["digital-twin", "camera-map", "ai-monitor"],
+    tabs: ["digital-twin", "camera-map", "ai-monitor", "voice-console"],
   },
   {
     id: "development",
@@ -41,6 +41,7 @@ export const TABS: Record<string, { title: string; kind: string }> = {
   "camera-map": { title: "Camera / Map", kind: "vision" },
   "ros-graph": { title: "ROS 2 Graph", kind: "graph" },
   "ai-monitor": { title: "AI Monitor", kind: "agent" },
+  "voice-console": { title: "Voice Console", kind: "data" },
   "memory-viewer": { title: "Memory Viewer", kind: "data" },
 };
 
@@ -227,6 +228,7 @@ export const TERMINALS = [
   { id: "sensors", title: "sensors", host: "pico-2w" },
   { id: "commands", title: "commands", host: "pi-bridge" },
   { id: "agent", title: "agent-trace", host: "sipher" },
+  { id: "voice", title: "voice", host: "sipher · groq" },
   { id: "ai", title: "ai-chat", host: "opencode · repo" },
   { id: "problems", title: "Problems", host: "" },
   { id: "powershell", title: "powershell", host: "local · win32 · conpty" },
