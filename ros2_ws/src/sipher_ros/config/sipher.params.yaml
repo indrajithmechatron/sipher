@@ -1,0 +1,17 @@
+sipher_driver:
+  ros__parameters:
+    serial_port: /dev/sipher-pico
+    baud: 115200
+    dashboard_interval_ms: 1000
+    bind_host: 0.0.0.0
+    tcp_port: 5000          # legacy broadcast/commands (command_endpoint, logger)
+    enable_compat: true     # false once all consumers moved to ROS 2
+    heartbeat_s: 5.0
+    frame_base: base_link
+    frame_odom: odom
+    frame_imu: imu_link
+    frame_tof: tof_link
+    frame_gps: gps_link
+    imu_xyz: [0.0, 0.0, 0.03]
+    tof_xyz: [0.08, 0.0, 0.02]
+    gps_xyz: [0.0, 0.0, 0.06]

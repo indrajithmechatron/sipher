@@ -29,6 +29,11 @@ hardware/**/*.gcode
 /.session_secret
 /profiles.json
 
+# ROS 2 colcon build artifacts (built on the Pi)
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
 # Retrieval index (rebuilt on demand)
 .rag/
 
