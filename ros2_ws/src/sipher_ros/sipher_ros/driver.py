@@ -143,8 +143,10 @@ class SipherDriver(Node):
         self._state_lock = threading.Lock()
         self._last_rx = 0.0
         self._pending = deque(maxlen=64)   # parsed lines awaiting ROS publish
-        self._clients = []
-        self._clients_lock = threading.Lock()
+        # NB: must NOT be called _clients — that name belongs to rclpy's
+        # Node (service clients) and the executor iterates it.
+        self._tcp_clients = []
+        self._tcp_clients_lock = threading.Lock()
         self._estop = False
         self._estop_pub_state = None
 
@@ -335,6 +337,8 @@ class SipherDriver(Node):
     # ROS publishing — executor thread only (timer-driven drain)
     # ------------------------------------------------------------------
     def _drain_pending(self):
+        data = None
+        raw = ""
         while True:
             with self._state_lock:
                 if not self._pending:
@@ -555,8 +559,8 @@ class SipherDriver(Node):
         if not data:
             return
         payload = json.dumps(data) + "\n"
-        with self._clients_lock:
-            clients = list(self._clients)
+        with self._tcp_clients_lock:
+            clients = list(self._tcp_clients)
         dead = []
         for sock in clients:
             try:
@@ -565,10 +569,10 @@ class SipherDriver(Node):
             except Exception:
                 dead.append(sock)
         if dead:
-            with self._clients_lock:
+            with self._tcp_clients_lock:
                 for sock in dead:
-                    if sock in self._clients:
-                        self._clients.remove(sock)
+                    if sock in self._tcp_clients:
+                        self._tcp_clients.remove(sock)
                     try:
                         sock.close()
                     except Exception:
@@ -583,8 +587,8 @@ class SipherDriver(Node):
         while True:
             try:
                 sock, addr = server.accept()
-                with self._clients_lock:
-                    self._clients.append(sock)
+                with self._tcp_clients_lock:
+                    self._tcp_clients.append(sock)
                 threading.Thread(target=self._tcp_client, args=(sock,), daemon=True).start()
             except Exception as e:
                 self.get_logger().error(f"tcp accept error: {e}")
@@ -622,9 +626,9 @@ class SipherDriver(Node):
         except Exception:
             pass
         finally:
-            with self._clients_lock:
-                if sock in self._clients:
-                    self._clients.remove(sock)
+            with self._tcp_clients_lock:
+                if sock in self._tcp_clients:
+                    self._tcp_clients.remove(sock)
             try:
                 sock.close()
             except Exception:
