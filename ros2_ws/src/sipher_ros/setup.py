@@ -21,6 +21,8 @@ setup(
     entry_points={
         "console_scripts": [
             "driver = sipher_ros.driver:main",
+            "control = sipher_ros.control:main",
+            "diagnostics = sipher_ros.diagnostics:main",
         ],
     },
 )

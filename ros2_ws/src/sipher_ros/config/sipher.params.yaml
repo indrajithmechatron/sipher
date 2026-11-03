@@ -15,3 +15,10 @@ sipher_driver:
     imu_xyz: [0.0, 0.0, 0.03]
     tof_xyz: [0.08, 0.0, 0.02]
     gps_xyz: [0.0, 0.0, 0.06]
+
+sipher_diagnostics:
+  ros__parameters:
+    publish_interval_s: 1.0
+    sensor_stale_s: 5.0
+    battery_low_v: 10.5
+    battery_critical_v: 9.5

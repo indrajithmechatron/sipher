@@ -147,7 +147,10 @@ class SipherDriver(Node):
         # Node (service clients) and the executor iterates it.
         self._tcp_clients = []
         self._tcp_clients_lock = threading.Lock()
-        self._estop = False
+        # Effective e-stop = firmware OR software (see _update_estop).
+        self._estop = False          # effective, gates motion
+        self._estop_fw = False       # from Pico firmware tick
+        self._estop_sw = False       # from /estop_cmd (sipher_control, latched)
         self._estop_pub_state = None
 
         # --- ROS 2 interfaces ---------------------------------------------
@@ -176,6 +179,8 @@ class SipherDriver(Node):
         self.create_subscription(ServoCmdArray, "/servo_cmds", self._on_servo_cmds, 10)
         self.create_subscription(Empty, "/relax", self._on_relax, 10)
         self.create_subscription(String, "/cmd_raw", self._on_cmd_raw, 10)
+        # Latched software e-stop from sipher_control (survives restarts).
+        self.create_subscription(Bool, "/estop_cmd", self._on_estop_cmd, latched_qos)
 
         self._publish_static_tf()
         # Drain parsed telemetry into ROS topics (keeps rclpy calls on the
@@ -374,13 +379,33 @@ class SipherDriver(Node):
         if isinstance(data.get("gps"), dict):
             self._pub_gps.publish(self._make_gps(data, stamp))
 
-        estop = bool(data.get("estop", False))
-        if estop != self._estop_pub_state:
-            self._estop_pub_state = estop
-            self._estop = estop
-            self._pub_estop.publish(Bool(data=estop))
-            if estop:
-                self.get_logger().error("E-STOP active — servos relaxed")
+        # Firmware e-stop from the tick (authoritative hardware side).
+        self._estop_fw = bool(data.get("estop", False))
+        self._update_estop("firmware")
+
+    # ------------------------------------------------------------------
+    # E-stop chain: effective = firmware OR software
+    # ------------------------------------------------------------------
+    def _update_estop(self, source):
+        """Recompute effective e-stop and publish on change (latched)."""
+        effective = self._estop_fw or self._estop_sw
+        if effective == self._estop_pub_state:
+            self._estop = effective
+            return
+        self._estop_pub_state = effective
+        self._estop = effective
+        self._pub_estop.publish(Bool(data=effective))
+        if effective:
+            self.get_logger().error(
+                f"E-STOP active ({source}) — motion refused, servos relaxed"
+            )
+        else:
+            self.get_logger().info(f"E-STOP cleared ({source}) — motion allowed")
+
+    def _on_estop_cmd(self, msg: Bool):
+        """Software e-stop from sipher_control (latched /estop_cmd)."""
+        self._estop_sw = bool(msg.data)
+        self._update_estop("software")
 
     @staticmethod
     def _make_joint_state(data, stamp):

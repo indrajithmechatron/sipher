@@ -1,4 +1,4 @@
-"""Bring up the Sipher driver node."""
+"""Bring up the Sipher driver + control + diagnostics nodes."""
 
 import os
 
@@ -16,6 +16,19 @@ def generate_launch_description():
             package="sipher_ros",
             executable="driver",
             name="sipher_driver",
+            output="screen",
+            parameters=[params],
+        ),
+        Node(
+            package="sipher_ros",
+            executable="control",
+            name="sipher_control",
+            output="screen",
+        ),
+        Node(
+            package="sipher_ros",
+            executable="diagnostics",
+            name="sipher_diagnostics",
             output="screen",
             parameters=[params],
         ),
