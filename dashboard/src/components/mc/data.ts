@@ -43,6 +43,7 @@ export const TABS: Record<string, { title: string; kind: string }> = {
   "ai-monitor": { title: "AI Monitor", kind: "agent" },
   "voice-console": { title: "Voice Console", kind: "data" },
   "memory-viewer": { title: "Memory Viewer", kind: "data" },
+  "servo-calibrate": { title: "Servo Calibrate", kind: "control" },
 };
 
 export type TreeNode = {
