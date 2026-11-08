@@ -28,6 +28,120 @@ try:
 except Exception:
     led = None
 
+# --- Status indicator LEDs (Pico 2 W) ---
+# Wiring: GPIO -> 330 ohm -> LED anode -> LED cathode -> GND  (active HIGH, 3.3 V)
+#   estop:   GP15   solid on = E-STOP asserted
+#   battery: GP26   solid on = battery OK, blink = battery < 5.5 V
+#   error:   GP27   blink = manual reset needed
+#   nrf:     GP28   solid = idle / listening, blink = TX or RX
+#   bridge:  GP25   onboard LED — solid = bridge connected, blink = trying to connect
+#   sensors: GP29   solid = all used sensors OK, blink = any sensor data missing
+_STATUS_LED_PINS = {
+    "estop": machine.Pin(15, machine.Pin.OUT),
+    "battery": machine.Pin(26, machine.Pin.OUT),
+    "error": machine.Pin(27, machine.Pin.OUT),
+    "nrf": machine.Pin(28, machine.Pin.OUT),
+    "bridge": led if led is not None else machine.Pin(25, machine.Pin.OUT),
+    "sensors": machine.Pin(29, machine.Pin.OUT),
+}
+_STATUS_LED_MODES = {
+    "estop": "on",
+    "battery": "auto",
+    "error": "blink",
+    "nrf": "auto",
+    "bridge": "auto",
+    "sensors": "auto",
+}
+_STATUS_LED_STATE = {"estop": "auto", "battery": "auto", "error": "auto", "nrf": "auto", "bridge": "auto", "sensors": "auto"}
+_STATUS_LED_BLINK_MS = {"battery": 500, "error": 250, "nrf": 120, "bridge": 500, "sensors": 400}
+_STATUS_LED_PHASE = {"estop": False, "battery": False, "error": False, "nrf": False, "bridge": False, "sensors": False}
+_STATUS_LED_PHASE_MS = {"estop": 0, "battery": 0, "error": 0, "nrf": 0, "bridge": 0, "sensors": 0}
+_STATUS_LED_TICK_MS = 100
+_status_led_next_ms = 0
+_BATTERY_LOW_V = 5.5          # status-LED battery threshold: <5.5 V -> blink
+
+
+def _status_led_level(name):
+    """True = LED should be solid ON; False = should blink (auto mode)."""
+    if name == "estop":
+        return _estop_active
+    if name == "bridge":
+        return _last_hb_ms != 0 and (time.ticks_ms() - _last_hb_ms) < 10000
+    if name == "nrf":
+        return not _nrf_activity
+    if name == "sensors":
+        s = _last_sensors if isinstance(_last_sensors, dict) else {}
+        ina = s.get("ina")
+        mpu = s.get("mpu")
+        vl = s.get("vl53_mm")
+        gps = s.get("gps")
+        pca = s.get("pca")
+        ok = True
+        if not (isinstance(mpu, list) and len(mpu) >= 6):
+            ok = False
+        if ina is None:
+            ok = False
+        if vl is None:
+            ok = False
+        if gps is None:
+            ok = False
+        if pca is None:
+            ok = False
+        return ok
+    if name == "battery":
+        ina = (_last_sensors or {}).get("ina") if isinstance(_last_sensors, dict) else None
+        v = ina.get("voltage_v") if isinstance(ina, dict) else None
+        return not (isinstance(v, (int, float)) and 0 < v < _BATTERY_LOW_V)
+    return False
+
+
+def _status_led_write(name):
+    pin = _STATUS_LED_PINS.get(name)
+    if pin is None:
+        return
+    state = _STATUS_LED_STATE.get(name, "auto")
+    if state == "on":
+        pin.value(1)
+        return
+    if state == "off":
+        pin.value(0)
+        return
+    mode = _STATUS_LED_MODES.get(name, "off")
+    if mode == "on":
+        pin.value(1)
+        return
+    if mode == "off":
+        pin.value(0)
+        return
+    if mode == "blink":
+        if _op_mode == "reset":
+            now = time.ticks_ms()
+            if time.ticks_diff(now, _STATUS_LED_PHASE_MS[name]) >= _STATUS_LED_BLINK_MS.get(name, 250):
+                _STATUS_LED_PHASE[name] = not _STATUS_LED_PHASE[name]
+                _STATUS_LED_PHASE_MS[name] = now
+            pin.value(1 if _STATUS_LED_PHASE[name] else 0)
+        else:
+            pin.value(0)
+        return
+    # mode == "auto"
+    if _status_led_level(name):
+        pin.value(1)
+    else:
+        if time.ticks_diff(time.ticks_ms(), _STATUS_LED_PHASE_MS[name]) >= _STATUS_LED_BLINK_MS.get(name, 400):
+            _STATUS_LED_PHASE[name] = not _STATUS_LED_PHASE[name]
+            _STATUS_LED_PHASE_MS[name] = time.ticks_ms()
+        pin.value(1 if _STATUS_LED_PHASE[name] else 0)
+
+
+def _status_leds_tick():
+    global _status_led_next_ms
+    now = time.ticks_ms()
+    if now < _status_led_next_ms:
+        return
+    _status_led_next_ms = now + _STATUS_LED_TICK_MS
+    for name in ("estop", "battery", "error", "nrf", "bridge", "sensors"):
+        _status_led_write(name)
+
 def _bus_for(addr):
     for _b in (i2c0, i2c1):
         try:
@@ -472,6 +586,7 @@ except Exception:
 _estop_active = False
 _admin_unlocked = False
 _last_estop_ms = 0
+_last_hb_ms = 0
 _admin_hold_start = 0
 _admin_hold_triggered = False
 _ADMIN_HOLD_MS = 2000
@@ -484,7 +599,7 @@ def _estop_trigger():
     _last_estop_ms = now
     _estop_active = True
     cmd_relax_all()
-    print(_json.dumps({cmd: estop, active: True}), flush=True)
+    print(_json.dumps({"estop": "activated", "active": True}), flush=True)
 
 def _estop_irq(pin):
     _estop_trigger()
@@ -784,9 +899,11 @@ def tft_blit(x, y, w, h, data):
 # nRF24L01+ PA+LNA
 # ---------------------------------------------------------------------------
 _nrf = None
+_nrf_activity = False
 
 def nrf_init(channel=76, rate=250000, pa="MAX"):
-    global _nrf
+    global _nrf, _nrf_activity
+    _nrf_activity = False
     try:
         from nrf24l01 import NRF24L01
         spi = _tft_init_spi()
@@ -804,9 +921,12 @@ def nrf_send(data, pipe_addr="e1f0f0f0f0"):
         if isinstance(data, str):
             data = data.encode()
         _nrf.open_tx_pipe(bytes.fromhex(pipe_addr))
+        _nrf_activity = True
         ok = _nrf.send(data)
+        _nrf_activity = False
         return {"nrf_send": ok, "bytes": len(data)}
     except Exception as e:
+        _nrf_activity = False
         return {"nrf_send": False, "error": str(e)}
 
 def nrf_recv():
@@ -814,11 +934,14 @@ def nrf_recv():
         return {"error": "nrf not initialized"}
     try:
         _nrf.start_listening()
+        _nrf_activity = True
         data = _nrf.recv()
+        _nrf_activity = False
         if data:
             return {"nrf_recv": data.hex(), "len": len(data)}
         return {"nrf_recv": None}
     except Exception as e:
+        _nrf_activity = False
         return {"nrf_recv": None, "error": str(e)}
 
 def nrf_status_cmd():
@@ -1184,6 +1307,207 @@ def cmd_clear():
     tft_clear()
     return {"clear": "ok"}
 
+def tft_render_dashboard(s):
+    """Render the original compact dashboard to the ILI9341 (landscape 320x240)."""
+    global _op_mode
+    try:
+        import framebuf
+    except Exception:
+        return {"render": "no_framebuf"}
+    try:
+        spi = _tft_init_spi()
+        if spi is None:
+            return {"render": "no_spi"}
+        w, h = 320, 240
+        buf = bytearray(w * h * 2)
+        fb = framebuf.FrameBuffer(buf, w, h, framebuf.RGB565)
+        BLACK = 0x0000
+        WHITE = 0xFFFF
+        GREEN = 0x07E0
+        RED = 0xF800
+        YELLOW = 0xFFE0
+        CYAN = 0x07FF
+        BLUE = 0x001F
+        GRAY = 0x8410
+
+        fb.fill(BLACK)
+        # header
+        fb.fill_rect(0, 0, w, 22, BLUE)
+        fb.text("DASHBOARD 2", 4, 7, WHITE)
+        fb.text("MODE:" + str(_op_mode).upper(), 150, 7, YELLOW)
+        if s is not None:
+            fb.text("UP:" + str(s.get("uptime_s", 0)) + "s", 250, 7, WHITE)
+
+        y = 26
+        # Battery panel
+        fb.rect(2, y, 156, 62, CYAN)
+        fb.text("BATTERY", 6, y + 4, CYAN)
+        ina = (s or {}).get("ina") if isinstance(s, dict) else None
+        if isinstance(ina, dict):
+            v = ina.get("voltage_v", 0)
+            i = ina.get("current_ma", 0)
+            p = ina.get("power_mw", 0)
+            fb.text("V:  " + str(v) + " V", 6, y + 16, WHITE)
+            fb.text("I:  " + str(i) + " mA", 6, y + 26, WHITE)
+            fb.text("P:  " + str(p) + " mW", 6, y + 36, WHITE)
+            if isinstance(v, (int, float)) and v < _LOW_BATT_V and v > 0:
+                fb.text("LOW BATTERY", 6, y + 48, RED)
+                _op_mode = "low_battery"
+            else:
+                fb.text("OK", 6, y + 48, GREEN)
+        else:
+            fb.text("no data", 6, y + 16, GRAY)
+
+        # IMU panel
+        fb.rect(162, y, 156, 62, GREEN)
+        fb.text("IMU", 166, y + 4, GREEN)
+        mpu = (s or {}).get("mpu") if isinstance(s, dict) else None
+        if isinstance(mpu, list) and len(mpu) >= 6:
+            fb.text("AX:" + str(mpu[0]), 166, y + 16, WHITE)
+            fb.text("AY:" + str(mpu[1]), 166, y + 26, WHITE)
+            fb.text("AZ:" + str(mpu[2]), 166, y + 36, WHITE)
+            fb.text("YAW:" + str((s or {}).get("yaw_deg", 0)), 166, y + 46, WHITE)
+        else:
+            fb.text("no imu", 166, y + 16, GRAY)
+
+        y = 92
+        # Distance panel
+        fb.rect(2, y, 104, 52, YELLOW)
+        fb.text("DISTANCE", 6, y + 4, YELLOW)
+        vl = (s or {}).get("vl53_mm") if isinstance(s, dict) else None
+        fb.text(str(vl) + " mm", 6, y + 20, WHITE)
+        if isinstance(vl, int) and vl < 100:
+            fb.text("CLOSE", 6, y + 32, RED)
+
+        # GPS panel
+        fb.rect(110, y, 104, 52, CYAN)
+        fb.text("GPS", 114, y + 4, CYAN)
+        gps = (s or {}).get("gps") if isinstance(s, dict) else None
+        if isinstance(gps, dict):
+            fb.text("fix:" + str(gps.get("fix", False)), 114, y + 16, WHITE)
+            fb.text("sat:" + str(gps.get("satellites", "-")), 114, y + 26, WHITE)
+            fb.text("spd:" + str(gps.get("speed_knots", "-")), 114, y + 36, WHITE)
+        else:
+            fb.text("no gps", 114, y + 16, GRAY)
+
+        # Servo/PCA panel
+        fb.rect(218, y, 100, 52, GREEN)
+        fb.text("SERVOS", 222, y + 4, GREEN)
+        pca = (s or {}).get("pca") if isinstance(s, dict) else None
+        if isinstance(pca, dict):
+            fb.text("present:" + str(pca.get("present", False)), 222, y + 16, WHITE)
+            pulses = pca.get("pulse_us") or []
+            if pulses:
+                fb.text("ch0:" + str(pulses[0]) + "us", 222, y + 26, WHITE)
+        else:
+            fb.text("no pca", 222, y + 16, GRAY)
+
+        y = 148
+        # Mode / control help panel
+        fb.rect(2, y, 316, 88, GRAY)
+        global _ui_menu_open, _ui_selected
+        fb.text("MODE SELECT (UP/DOWN, SEL=apply)", 6, y + 4, GRAY)
+        for i, m in enumerate(_MODES):
+            col = YELLOW if i == _ui_selected else WHITE
+            prefix = "> " if i == _ui_selected else "  "
+            fb.text(prefix + m, 6, y + 16 + i * 10, col)
+        fb.text("estop:" + str((s or {}).get("estop", False)), 170, y + 16, RED if (s or {}).get("estop") else GREEN)
+        fb.text("view: " + _display_view, 170, y + 26, WHITE)
+        fb.text("menu: " + ("OPEN" if _ui_menu_open else "closed"), 170, y + 36, WHITE)
+        fb.text("L=IMG R=DASH O=SERVO M=MENU", 6, y + 76, GRAY)
+
+        # blit
+        _tft_set_window(0, 0, w - 1, h - 1)
+        _TFT_CS.value(0)
+        _TFT_DC.value(1)
+        spi.write(buf)
+        _TFT_CS.value(1)
+        return {"render": "ok"}
+    except Exception as e:
+        return {"render": "error", "detail": str(e)}
+
+def tft_render_servo():
+    """Render a servo control screen on the TFT."""
+    global _servo_ch, _servo_deg
+    try:
+        import framebuf
+    except Exception:
+        return {"render": "no_framebuf"}
+    try:
+        spi = _tft_init_spi()
+        if spi is None:
+            return {"render": "no_spi"}
+        w, h = 320, 240
+        buf = bytearray(w * h * 2)
+        fb = framebuf.FrameBuffer(buf, w, h, framebuf.RGB565)
+        BLACK = 0x0000
+        WHITE = 0xFFFF
+        CYAN = 0x07FF
+        GREEN = 0x07E0
+        RED = 0xF800
+        YELLOW = 0xFFE0
+        BLUE = 0x001F
+        GRAY = 0x8410
+
+        fb.fill(BLACK)
+        fb.fill_rect(0, 0, w, 24, BLUE)
+        fb.text("SERVO CONTROL", 6, 8, WHITE)
+        fb.text("MENU=back", 230, 8, YELLOW)
+
+        # channel
+        fb.rect(4, 30, 312, 60, CYAN)
+        fb.text("CHANNEL", 8, 36, CYAN)
+        fb.text(str(_servo_ch), 8, 52, WHITE)
+        fb.text("LEFT/RIGHT change ch", 8, 72, GRAY)
+
+        # angle
+        fb.rect(4, 96, 312, 60, GREEN)
+        fb.text("ANGLE", 8, 102, GREEN)
+        fb.text(str(_servo_deg) + " deg", 8, 118, WHITE)
+        # bar
+        barw = int(_servo_deg / 180.0 * 280)
+        fb.fill_rect(8, 140, 280, 10, GRAY)
+        fb.fill_rect(8, 140, barw, 10, GREEN)
+        fb.text("UP/DOWN change angle", 8, 156, GRAY)
+
+        fb.text("SELECT = apply servo", 8, 180, YELLOW)
+        fb.text("ch" + str(_servo_ch) + " -> " + str(_servo_deg) + " deg", 8, 196, WHITE)
+
+        # blit
+        _tft_set_window(0, 0, w - 1, h - 1)
+        _TFT_CS.value(0)
+        _TFT_DC.value(1)
+        spi.write(buf)
+        _TFT_CS.value(1)
+        return {"render": "ok"}
+    except Exception as e:
+        return {"render": "error", "detail": str(e)}
+
+def cmd_display_view(view=None):
+    global _display_view
+    if view == "toggle":
+        _display_view = "dashboard" if _display_view == "image" else "image"
+    elif view in ("image", "dashboard"):
+        _display_view = view
+    if _display_view == "image":
+        return cmd_show_image()
+    return tft_render_dashboard(_last_sensors)
+
+def cmd_set_mode(mode=None):
+    global _op_mode
+    allowed = ("idle", "manual", "auto", "steady", "low_battery", "reset")
+    if mode in allowed:
+        _op_mode = mode
+        if mode == "reset":
+            try:
+                cmd_estop_clear()
+            except Exception:
+                pass
+            _op_mode = "idle"
+    if _display_view == "dashboard":
+        tft_render_dashboard(_last_sensors)
+    return {"mode": _op_mode}
+
 def cmd_show_image():
     """Display the pre-loaded image from flash (anime.rgb565, 320x240 RGB565)."""
     try:
@@ -1213,6 +1537,11 @@ def cmd_dashboard(interval_ms):
 
 def cmd_ping():
     return {"cmd": "pong", "t": time.ticks_ms()}
+
+def cmd_heartbeat():
+    global _last_hb_ms
+    _last_hb_ms = time.ticks_ms()
+    return {"cmd": "heartbeat_ack"}
 
 def cmd_set_time(unix_ts):
     rtc_set(unix_ts)
@@ -1249,6 +1578,79 @@ def cmd_servo_ch0_90():
     pca_set_channel(0, 1500)
     return {"ch0_90": "ok", "ch": 0, "deg": 90, "pulse_us": 1500}
 
+def buttons_init():
+    global _btn_obj, _btn_prev
+    for name, pin in _BTN_PINS.items():
+        try:
+            p = machine.Pin(pin, machine.Pin.IN, machine.Pin.PULL_UP)
+            _btn_obj[name] = p
+            _btn_prev[name] = p.value()
+        except Exception:
+            _btn_obj[name] = None
+
+def _handle_button(name):
+    global _ui_selected, _ui_menu_open, _display_view, _op_mode
+    global _ui_screen, _servo_ch, _servo_deg
+    if _ui_screen == "servo":
+        if name == "up":
+            _servo_deg = min(180, _servo_deg + 5)
+        elif name == "down":
+            _servo_deg = max(0, _servo_deg - 5)
+        elif name == "left":
+            _servo_ch = max(0, _servo_ch - 1)
+        elif name == "right":
+            _servo_ch = min(15, _servo_ch + 1)
+        elif name == "select":
+            try:
+                cmd_servo(_servo_ch, _servo_deg)
+            except Exception:
+                pass
+        elif name == "menu":
+            _ui_screen = "dashboard"
+        elif name == "options":
+            _ui_screen = "dashboard"
+        if _display_view == "dashboard":
+            tft_render_servo()
+        return
+    # dashboard screen
+    if name == "up":
+        _ui_selected = (_ui_selected - 1) % len(_MODES)
+    elif name == "down":
+        _ui_selected = (_ui_selected + 1) % len(_MODES)
+    elif name == "select":
+        cmd_set_mode(_MODES[_ui_selected])
+    elif name == "left":
+        cmd_display_view("image")
+    elif name == "right":
+        cmd_display_view("dashboard")
+    elif name == "menu":
+        _ui_menu_open = not _ui_menu_open
+    elif name == "options":
+        _ui_menu_open = False
+        _ui_screen = "servo"
+    if _display_view == "dashboard":
+        if _ui_screen == "servo":
+            tft_render_servo()
+        else:
+            tft_render_dashboard(_last_sensors)
+
+def buttons_poll():
+    now = time.ticks_ms()
+    for name in _BTN_PINS:
+        p = _btn_obj.get(name)
+        if p is None:
+            continue
+        try:
+            val = p.value()
+        except Exception:
+            continue
+        prev = _btn_prev.get(name, 1)
+        if prev == 1 and val == 0:
+            if time.ticks_diff(now, _btn_last_ms.get(name, 0)) >= _BTN_DEBOUNCE_MS:
+                _btn_last_ms[name] = now
+                _handle_button(name)
+        _btn_prev[name] = val
+
 CMD_MAP = {
     "scan": (lambda p: cmd_scan()),
     "sensors": (lambda p: cmd_sensors()),
@@ -1274,6 +1676,8 @@ CMD_MAP = {
     "text": (lambda p: cmd_text(p.get("x",0), p.get("y",0), p.get("text",""), p.get("color",0xFFFF), p.get("size",1))),
     "clear": (lambda p: cmd_clear()),
     "show_image": (lambda p: cmd_show_image()),
+    "display_view": (lambda p: cmd_display_view(p.get("view"))),
+    "set_mode": (lambda p: cmd_set_mode(p.get("mode"))),
     "dashboard": (lambda p: cmd_dashboard(p.get("interval_ms", 1000))),
     "ping": (lambda p: cmd_ping()),
     "time": (lambda p: cmd_set_time(p.get("set", 0)) if "set" in p else cmd_get_time()),
@@ -1295,6 +1699,34 @@ CMD_MAP = {
 _dashboard_interval = 1000
 _dashboard_running = True
 
+# --- TFT dashboard state ---
+_display_view = "dashboard"      # "image" | "dashboard" (default: dashboard)
+
+# --- Animation state ---
+_anim_t = 0
+_eye_cx = 0
+_eye_data = None
+_eye_ok = False
+_op_mode = "idle"               # idle | manual | auto | steady | low_battery | reset
+_last_sensors = None
+_LOW_BATT_V = 10.5
+
+# --- Button navigation (active-low, internal pull-ups) ---
+# NOTE: GP6 / GP7 are reserved for the E-stop (TTP223) and admin-unlock (TTP223)
+# touch sensors respectively. Nav buttons live on free GPIOs:
+_BTN_PINS = {"up": 23, "down": 24, "left": 10, "right": 11,
+             "select": 12, "menu": 13, "options": 14}
+_btn_obj = {}
+_btn_prev = {}
+_btn_last_ms = {}
+_BTN_DEBOUNCE_MS = 180
+_MODES = ["idle", "manual", "auto", "steady", "low_battery", "reset"]
+_ui_selected = 0
+_ui_menu_open = False
+_ui_screen = "dashboard"   # "dashboard" | "servo"
+_servo_ch = 0
+_servo_deg = 90
+
 def main():
     global _yaw_last_ms
     try:
@@ -1303,12 +1735,18 @@ def main():
         pass
     _mpu_init()
     tft_ok = tft_init()
-    if tft_ok:
-        img = cmd_show_image()
-        tft_ok = img.get("show_image") == "ok"
     _yaw_last_ms = time.ticks_ms()
     cal = gyro_calibrate(100, 5)      # ~0.5 s, robot should be still
+    # Boot straight into the live TFT dashboard
+    try:
+        cmd_display_view("dashboard")
+    except Exception:
+        pass
     print(_json.dumps({"version": FW_VERSION, "tft": tft_ok, "gyro": cal, "ready": True}))
+    try:
+        buttons_init()
+    except Exception:
+        pass
     buf = b""
     last_tick = time.ticks_ms()
     poller = None
@@ -1321,12 +1759,24 @@ def main():
     while True:
         try:
             _admin_hold_check()
+            try:
+                buttons_poll()
+            except Exception:
+                pass
+            _status_leds_tick()
             if _dashboard_running and _dashboard_interval > 0:
                 if time.ticks_diff(time.ticks_ms(), last_tick) >= _dashboard_interval:
                     last_tick = time.ticks_ms()
                     sensors = cmd_sensors()
+                    global _last_sensors
+                    _last_sensors = sensors
                     sensors["cmd"] = "dashboard_tick"
                     print(_json.dumps(sensors))
+                    if _display_view == "dashboard":
+                        if _ui_screen == "servo":
+                            tft_render_servo()
+                        else:
+                            tft_render_dashboard(sensors)
             if poller is not None:
                 if not poller.poll(20):
                     continue
