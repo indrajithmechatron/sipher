@@ -81,6 +81,11 @@ _latest_sensor = {}
 _sensor_meta = {"pico_live": False, "pico_age_ms": None, "bridge_ok": False}
 _sensor_lock = threading.Lock()
 
+# ROS 2 gateway state (R4)
+_ROS_NODE = None
+_ROS_PUBS = {}
+_ROS_LOCK = threading.Lock()
+
 # ---------------------------------------------------------------------------
 # Pi host stats — real readings, refreshed by the poller thread
 # ---------------------------------------------------------------------------
@@ -135,7 +140,106 @@ def _bridge_send(req, timeout=3):
         except Exception:
             pass
 
-def _read_float(path):
+def _ros_gateway():
+    """Lazily create an rclpy node + publishers. Returns node or None.
+
+    Replaces the TCP:5000 bridge as the command dispatch backend (R4). Returns
+    None when ROS 2 is unavailable (e.g. unit tests without a ROS env) so
+    callers can fall back gracefully.
+    """
+    global _ROS_NODE
+    with _ROS_LOCK:
+        if _ROS_NODE is not None:
+            return _ROS_NODE
+        try:
+            import rclpy
+            from rclpy.node import Node
+        except Exception:
+            return None
+        try:
+            if not rclpy.ok():
+                rclpy.init()
+        except Exception:
+            pass
+        try:
+            node = rclpy.create_node("sipher_command_endpoint")
+        except Exception:
+            return None
+        try:
+            from std_msgs.msg import Empty, String
+            from sipher_msgs.msg import ServoCmd, ServoCmdArray
+            _ROS_PUBS["servo_cmd"] = node.create_publisher(ServoCmd, "/servo_cmd", 10)
+            _ROS_PUBS["servo_cmds"] = node.create_publisher(ServoCmdArray, "/servo_cmds", 10)
+            _ROS_PUBS["relax"] = node.create_publisher(Empty, "/relax", 10)
+            _ROS_PUBS["cmd_raw"] = node.create_publisher(String, "/cmd_raw", 10)
+        except Exception:
+            return None
+
+        def _spin():
+            while True:
+                try:
+                    if not rclpy.ok():
+                        break
+                    rclpy.spin_once(node, timeout_sec=0.1)
+                except Exception:
+                    time.sleep(0.1)
+
+        threading.Thread(target=_spin, daemon=True, name="ros-gateway").start()
+        _ROS_NODE = node
+        return node
+
+
+def _ros_publish(req):
+    """Validate + publish one command via ROS 2. Returns (forwarded, error)."""
+    node = _ros_gateway()
+    if node is None:
+        return False, "ros2 unavailable"
+    if not isinstance(req, dict):
+        return False, "json must be object"
+    cmd = req.get("cmd")
+    if cmd == "servo":
+        ch = req.get("ch"); deg = req.get("deg")
+        if not isinstance(ch, int) or isinstance(ch, bool) or ch < 0 or ch > 15:
+            return False, "ch must be 0-15"
+        try:
+            deg = float(deg)
+        except (TypeError, ValueError):
+            return False, "deg must be numeric"
+        deg = max(0.0, min(180.0, deg))
+        from sipher_msgs.msg import ServoCmd
+        m = ServoCmd()
+        m.ch = int(ch)
+        m.deg = float(deg)
+        _ROS_PUBS["servo_cmd"].publish(m)
+        return True, None
+    if cmd in ("servos", "servo_batch"):
+        positions = req.get("positions")
+        if not isinstance(positions, list):
+            return False, "positions must be a list"
+        if len(positions) > 16:
+            return False, "too many positions"
+        from sipher_msgs.msg import ServoCmd, ServoCmdArray
+        arr = ServoCmdArray()
+        for i, v in enumerate(positions):
+            if v is None:
+                continue
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                return False, "position must be numeric or null"
+            v = max(0.0, min(180.0, float(v)))
+            c = ServoCmd()
+            c.ch = int(i)
+            c.deg = float(v)
+            arr.commands.append(c)
+        _ROS_PUBS["servo_cmds"].publish(arr)
+        return True, None
+    if cmd in ("relax", "relax_all"):
+        from std_msgs.msg import Empty
+        _ROS_PUBS["relax"].publish(Empty())
+        return True, None
+    # passthrough for everything else (size cap enforced by caller)
+    from std_msgs.msg import String
+    _ROS_PUBS["cmd_raw"].publish(String(data=json.dumps(req)))
+    return True, None
     try:
         with open(path) as f:
             return float(f.read().strip())
@@ -1124,11 +1228,14 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
             return
         req = {"cmd": "servo", "ch": ch, "deg": deg}
         try:
-            reply = _bridge_send(req)
+            forwarded, err = _ros_publish(req)
         except Exception as e:
-            self.send_json({"error": f"bridge unreachable: {e}"}, 503)
+            self.send_json({"error": f"ros2 gateway error: {e}"}, 503)
             return
-        self.send_json({"ok": True, "sent": req, "bridge": reply})
+        if err:
+            self.send_json({"error": err}, 400)
+            return
+        self.send_json({"ok": True, "sent": req, "ros": {"forwarded": forwarded}})
 
     def handle_rag(self, method):
         """Serve the retrieval layer (Layer 1) at /api/rag/*.
@@ -1181,7 +1288,11 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
             self.send_json({"error": f"bridge map not reachable: {e}"}, 502)
 
     def handle_bridge_cmd(self):
-        """Forward a command to the bridge via TCP port 5000."""
+        """Dispatch a command via the ROS 2 gateway (R4).
+
+        HTTP API shape is unchanged from the TCP:5000 era. Inbound validation:
+        JSON object, 4 KB cap, ch 0-15, deg clamped 0-180.
+        """
         sess = _session_from_request(self)
         if sess is not None:
             if _ROLE_RANK.get(sess["role"], 0) < 1:
@@ -1192,9 +1303,12 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
             if not allowed:
                 self.send_json({"error": "admin required"}, 403)
                 return
-        content_length = int(self.headers.get("Content-Length", 0))
+        content_length = int(self.headers.get("Content-Length", 0) or 0)
         if content_length == 0:
             self.send_json({"error": "empty body"}, 400)
+            return
+        if content_length > 4096:
+            self.send_json({"error": "body too large"}, 413)
             return
         body = self.rfile.read(content_length)
         try:
@@ -1202,26 +1316,19 @@ class SipherHandler(http.server.BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self.send_json({"error": "invalid json"}, 400)
             return
+        if not isinstance(req, dict):
+            self.send_json({"error": "json must be object"}, 400)
+            return
         try:
-            import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(3)
-            sock.connect(("127.0.0.1", 5000))
-            sock.sendall((json.dumps(req) + "\n").encode())
-            buf = b""
-            while b"\n" not in buf:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    break
-                buf += chunk
-            sock.close()
-            line = buf.split(b"\n", 1)[0].decode(errors="replace").strip()
-            if not line:
-                self.send_json({"bridge": "ok"})
-                return
-            self.send_json(json.loads(line))
+            forwarded, err = _ros_publish(req)
         except Exception as e:
-            self.send_json({"error": f"bridge not reachable: {e}"})
+            self.send_json({"error": f"ros2 gateway error: {e}"}, 503)
+            return
+        if err:
+            self.send_json({"error": err}, 400)
+            return
+        self.send_json({"bridge_ack": True, "forwarded": forwarded,
+                        "cmd": req.get("cmd"), "ts": time.time()})
 
     def _set_session_cookie(self, token: str):
         self.send_header("Set-Cookie", "sipher_session=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800" % token)

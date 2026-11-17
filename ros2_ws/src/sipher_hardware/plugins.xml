@@ -1,0 +1,11 @@
+<library path="sipher_system_hardware">
+  <class name="sipher_hardware/SipherSystemHardware"
+         type="sipher_hardware::SipherSystemHardware"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Sipher quadruped servo hardware. State comes from the driver's
+      /sensors topic; commands go out on /servo_cmds (single serial owner
+      remains sipher_driver, which also enforces the e-stop gate).
+    </description>
+  </class>
+</library>

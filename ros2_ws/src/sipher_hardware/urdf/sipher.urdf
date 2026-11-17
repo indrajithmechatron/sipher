@@ -1,0 +1,251 @@
+<?xml version="1.0"?>
+<robot name="sipher">
+  <link name="base_link"/>
+  <link name="ch0_link"/>
+  <link name="ch1_link"/>
+  <link name="ch2_link"/>
+  <link name="ch3_link"/>
+  <link name="ch4_link"/>
+  <link name="ch5_link"/>
+  <link name="ch6_link"/>
+  <link name="ch7_link"/>
+  <link name="ch8_link"/>
+  <link name="ch9_link"/>
+  <link name="ch10_link"/>
+  <link name="ch11_link"/>
+  <link name="ch12_link"/>
+  <link name="ch13_link"/>
+  <link name="ch14_link"/>
+  <link name="ch15_link"/>
+
+  <joint name="ch0" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch0_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch1" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch1_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch2" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch2_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch3" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch3_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch4" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch4_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch5" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch5_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch6" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch6_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch7" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch7_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch8" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch8_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch9" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch9_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch10" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch10_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch11" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch11_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch12" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch12_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch13" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch13_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch14" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch14_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+  <joint name="ch15" type="revolute">
+    <parent link="base_link"/>
+    <child link="ch15_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="3.14159265" effort="5.0" velocity="6.2831853"/>
+  </joint>
+
+  <ros2_control name="SipherSystem" type="system">
+    <hardware>
+      <plugin>sipher_hardware/SipherSystemHardware</plugin>
+    </hardware>
+  <joint name="ch0">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch1">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch2">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch3">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch4">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch5">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch6">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch7">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch8">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch9">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch10">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch11">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch12">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch13">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch14">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  <joint name="ch15">
+    <command_interface name="position">
+      <param name="min">0.0</param>
+      <param name="max">3.14159265</param>
+    </command_interface>
+    <state_interface name="position"/>
+  </joint>
+  </ros2_control>
+</robot>
